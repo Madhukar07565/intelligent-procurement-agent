@@ -22,6 +22,7 @@ from .approval import APPROVER, REQUESTER, User
 ROLES = (REQUESTER, APPROVER)
 USERNAME_RE = re.compile(r"^[a-z0-9._-]{3,32}$")
 MIN_PASSWORD_LENGTH = 8
+MIN_WEAK_PASSWORD_LENGTH = 4  # only with allow_weak=True (demo accounts)
 MAX_FAILED_ATTEMPTS = 5
 LOCKOUT_SECONDS = 300
 _SCRYPT = {"n": 2 ** 14, "r": 8, "p": 1, "dklen": 32}
@@ -77,14 +78,20 @@ class UserStore:
         tmp.replace(self.path)  # atomic on POSIX
 
     # ---- account management ----------------------------------------------
-    def add_user(self, username: str, password: str, role: str, display_name: str = "") -> Account:
+    @staticmethod
+    def _check_password(password: str, allow_weak: bool) -> None:
+        minimum = MIN_WEAK_PASSWORD_LENGTH if allow_weak else MIN_PASSWORD_LENGTH
+        if len(password) < minimum:
+            raise AuthError(f"Password must be at least {minimum} characters.")
+
+    def add_user(self, username: str, password: str, role: str, display_name: str = "",
+                 allow_weak: bool = False) -> Account:
         username = username.strip().lower()
         if not USERNAME_RE.match(username):
             raise AuthError("Username must be 3-32 characters: lowercase letters, digits, '.', '_' or '-'.")
         if role not in ROLES:
             raise AuthError(f"Role must be one of: {', '.join(ROLES)}.")
-        if len(password) < MIN_PASSWORD_LENGTH:
-            raise AuthError(f"Password must be at least {MIN_PASSWORD_LENGTH} characters.")
+        self._check_password(password, allow_weak)
         with self._lock:
             users = self._load()
             if username in users:
@@ -95,9 +102,8 @@ class UserStore:
             self._save(users)
         return Account(username, role, display_name.strip() or username)
 
-    def set_password(self, username: str, password: str) -> None:
-        if len(password) < MIN_PASSWORD_LENGTH:
-            raise AuthError(f"Password must be at least {MIN_PASSWORD_LENGTH} characters.")
+    def set_password(self, username: str, password: str, allow_weak: bool = False) -> None:
+        self._check_password(password, allow_weak)
         with self._lock:
             users = self._load()
             if username not in users:

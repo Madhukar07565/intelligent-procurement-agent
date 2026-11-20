@@ -40,9 +40,12 @@ def main() -> int:
     add.add_argument("role", choices=ROLES)
     add.add_argument("--name", default="")
     add.add_argument("--password-stdin", action="store_true")
+    add.add_argument("--allow-weak-password", action="store_true",
+                     help="allow 4-7 character passwords (demo accounts only)")
     pw = sub.add_parser("passwd")
     pw.add_argument("username")
     pw.add_argument("--password-stdin", action="store_true")
+    pw.add_argument("--allow-weak-password", action="store_true")
     rm = sub.add_parser("remove")
     rm.add_argument("username")
     sub.add_parser("list")
@@ -51,10 +54,11 @@ def main() -> int:
     store = UserStore(args.users_file)
     try:
         if args.cmd == "add":
-            acct = store.add_user(args.username, read_password(args.password_stdin), args.role, args.name)
+            acct = store.add_user(args.username, read_password(args.password_stdin), args.role, args.name,
+                                  allow_weak=args.allow_weak_password)
             print(f"Added {acct.username} ({acct.role})")
         elif args.cmd == "passwd":
-            store.set_password(args.username, read_password(args.password_stdin))
+            store.set_password(args.username, read_password(args.password_stdin), allow_weak=args.allow_weak_password)
             print(f"Password changed for {args.username}")
         elif args.cmd == "remove":
             store.remove_user(args.username)

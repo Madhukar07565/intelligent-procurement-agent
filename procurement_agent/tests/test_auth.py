@@ -106,3 +106,13 @@ def test_AU9_password_change_and_removal(users):
 def test_AU10_missing_users_file_means_nobody_can_log_in(tmp_path):
     with pytest.raises(AuthError):
         UserStore(tmp_path / "none.json").authenticate("alice", "whatever1")
+
+
+def test_AU11_weak_password_only_with_explicit_flag(tmp_path):
+    s = UserStore(tmp_path / "u.json")
+    with pytest.raises(AuthError, match="at least 8"):
+        s.add_user("demo1", "1234", "requester")
+    s.add_user("demo1", "1234", "requester", allow_weak=True)
+    assert s.authenticate("demo1", "1234").role == "requester"
+    with pytest.raises(AuthError, match="at least 4"):
+        s.add_user("demo2", "123", "requester", allow_weak=True)
