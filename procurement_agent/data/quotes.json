@@ -1,0 +1,10 @@
+[
+  {"supplier": "Acme Supplies", "product": "laptop", "unit_price": 950.0, "currency": "USD", "lead_time_days": 10, "valid_until": "2027-12-31", "quote_ref": "ACM-1001"},
+  {"supplier": "TechWorld", "product": "laptop", "unit_price": 899.0, "currency": "USD", "lead_time_days": 21, "valid_until": "2027-12-31", "quote_ref": "TWD-2001"},
+  {"supplier": "QuickShip Ltd", "product": "laptop", "unit_price": 1020.0, "currency": "USD", "lead_time_days": 5, "valid_until": "2027-12-31", "quote_ref": "QSL-3001"},
+  {"supplier": "OldDeals Inc", "product": "laptop", "unit_price": 800.0, "currency": "USD", "lead_time_days": 7, "valid_until": "2026-01-31", "quote_ref": "ODI-4001"},
+  {"supplier": "Acme Supplies", "product": "monitor", "unit_price": 210.0, "currency": "USD", "lead_time_days": 7, "valid_until": "2027-12-31", "quote_ref": "ACM-1002"},
+  {"supplier": "TechWorld", "product": "monitor", "unit_price": 195.0, "currency": "USD", "lead_time_days": 14, "valid_until": "2027-12-31", "quote_ref": "TWD-2002"},
+  {"supplier": "OfficePro", "product": "office chair", "unit_price": 140.0, "currency": "USD", "lead_time_days": 12, "valid_until": "2027-12-31", "quote_ref": "OFP-5001"},
+  {"supplier": "QuickShip Ltd", "product": "office chair", "unit_price": 165.0, "currency": "USD", "lead_time_days": 4, "valid_until": "2027-12-31", "quote_ref": "QSL-3002"}
+]
