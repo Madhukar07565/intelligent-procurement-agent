@@ -15,6 +15,7 @@ from typing import Callable
 
 from .models import Decision, Quote, Recommendation
 from .po import PurchaseOrder, PurchaseOrderIssuer
+from .store import SqliteCaseStore
 
 PENDING = "PENDING_APPROVAL"
 APPROVED = "APPROVED"
@@ -40,6 +41,7 @@ class Case:
     case_id: str
     recommendation: Recommendation
     submitted_by: str
+    submitted_at: str = ""
     status: str = PENDING
     decision: Decision | None = None
     chosen_quote: Quote | None = None
@@ -57,12 +59,12 @@ def _utcnow() -> datetime:
 
 class ApprovalService:
     def __init__(self, audit_path: str | Path, clock: Callable[[], datetime] = _utcnow,
-                 po_issuer: PurchaseOrderIssuer | None = None):
+                 po_issuer: PurchaseOrderIssuer | None = None, store: SqliteCaseStore | None = None):
         self._po_issuer = po_issuer
+        self._store = store or SqliteCaseStore(":memory:")
         self._audit_path = Path(audit_path)
         self._audit_path.parent.mkdir(parents=True, exist_ok=True)
         self._clock = clock
-        self._cases: dict[str, Case] = {}
         self._lock = threading.Lock()
 
     # ---- audit -------------------------------------------------------
@@ -78,7 +80,7 @@ class ApprovalService:
             raise ApprovalError("There is no supplier option to approve.")
         case_id = uuid.uuid4().hex[:8]
         with self._lock:
-            self._cases[case_id] = Case(case_id, recommendation, submitted_by)
+            self._store.save(Case(case_id, recommendation, submitted_by, submitted_at=self._clock().isoformat()))
         self._audit("submitted", case_id, submitted_by, {
             "request": recommendation.request.to_dict(),
             "ranking": recommendation.comparison.to_dict(),
@@ -94,14 +96,16 @@ class ApprovalService:
             raise ApprovalError("No purchase order has been issued for this case.")
         return self._po_issuer.pdf_bytes(case.purchase_order)
 
-    def list_cases(self) -> list[Case]:
-        return list(self._cases.values())
+    def list_cases(self, submitted_by: str | None = None, statuses: list[str] | None = None) -> list[Case]:
+        """Cases in submission order, optionally filtered by submitter and status."""
+        return self._store.list(submitted_by, statuses)
 
     def get(self, case_id: str) -> Case:
-        try:
-            return self._cases[case_id]
-        except KeyError:
-            raise ApprovalError(f"Unknown case: {case_id}") from None
+        """A fresh copy of the stored case. Changes to it are not saved."""
+        case = self._store.get(case_id)
+        if case is None:
+            raise ApprovalError(f"Unknown case: {case_id}")
+        return case
 
     def decide(
         self,
@@ -127,6 +131,7 @@ class ApprovalService:
             case.decision = decision
             case.status = APPROVED if approve else REJECTED
             case.chosen_quote = chosen if approve else None
+            self._store.save(case)
         self._audit("approved" if approve else "rejected", case_id, user.name, {
             "comment": comment,
             "chosen_supplier": decision.chosen_supplier,
@@ -166,10 +171,12 @@ class ApprovalService:
                 po = self._po_issuer.issue(fields)
             except Exception as exc:  # disk full, permissions, remote failure
                 case.po_error = str(exc)
+                self._store.save(case)
                 self._audit("po_failed", case_id, user.name, {"error": str(exc)})
                 raise ApprovalError(f"Approved, but the purchase order could not be generated: {exc}") from exc
             case.purchase_order, case.po_error = po, None
             case.status = PO_ISSUED
+            self._store.save(case)
         self._audit("po_issued", case_id, user.name, {
             "po_number": po.po_number, "supplier": po.supplier,
             "total_price": po.total_price, "currency": po.currency,

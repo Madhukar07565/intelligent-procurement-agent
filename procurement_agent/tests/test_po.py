@@ -179,7 +179,8 @@ def test_PO10_issuer_failure_keeps_approval_and_can_be_retried(tmp_path, rec, cl
     assert audit(svc)[-1]["event"] == "po_failed"
     issuer.fail = False
     po = svc.issue_po(cid, BOB)
-    assert svc.get(cid).status == PO_ISSUED and po.po_number == "PO-2026-0001" and case.po_error is None
+    case = svc.get(cid)
+    assert case.status == PO_ISSUED and po.po_number == "PO-2026-0001" and case.po_error is None
 
 
 def test_PO11_only_approver_can_retry(tmp_path, rec, clock):

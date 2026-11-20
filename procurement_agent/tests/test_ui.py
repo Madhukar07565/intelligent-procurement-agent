@@ -1,7 +1,13 @@
-import tempfile
+"""Streamlit UI tests: login, role-specific screens, approval flow and persistence."""
 from pathlib import Path
 
+import pytest
 from streamlit.testing.v1 import AppTest
+
+from procurement.auth import UserStore
+
+DATA = Path(__file__).resolve().parent.parent / "data" / "quotes.json"
+PASSWORDS = {"alice": "alice-pass-123", "carol": "carol-pass-123", "bob": "bob-pass-123"}
 
 
 def app_script():
@@ -10,27 +16,40 @@ def app_script():
     from fakes import ScriptedLLM
     from procurement.agent import ProcurementAgent
     from procurement.approval import ApprovalService
+    from procurement.auth import UserStore
+    from procurement.po import FilePurchaseOrderIssuer
     from procurement.quotes import QuoteRepository
+    from procurement.store import SqliteCaseStore
     from procurement.ui import render
 
-    DATA = "DATA_PATH"
+    TMP = "TMP_DIR"
     if "agent" not in st.session_state:
         st.session_state["agent"] = ProcurementAgent(
             ScriptedLLM({"product": "laptop", "quantity": 50, "required_date": "2026-12-15"}),
-            QuoteRepository(DATA))
-        from procurement.po import FilePurchaseOrderIssuer
-        st.session_state["svc"] = ApprovalService(Path_AUDIT, po_issuer=FilePurchaseOrderIssuer(Path_PO))
-    render(st.session_state["agent"], st.session_state["svc"], today=date(2026, 11, 20))
+            QuoteRepository("DATA_PATH"))
+        st.session_state["svc"] = ApprovalService(
+            TMP + "/audit.jsonl", po_issuer=FilePurchaseOrderIssuer(TMP + "/pos"),
+            store=SqliteCaseStore(TMP + "/cases.db"))
+        st.session_state["users"] = UserStore(TMP + "/users.json")
+    render(st.session_state["agent"], st.session_state["svc"], st.session_state["users"],
+           today=date(2026, 11, 20))
 
 
-def make_app(tmp):
-    from pathlib import Path
-    data = Path(__file__).resolve().parent.parent / "data" / "quotes.json"
-    import inspect, textwrap
-    src = textwrap.dedent(inspect.getsource(app_script))
-    src = src.replace('"DATA_PATH"', repr(str(data))).replace("Path_AUDIT", repr(str(Path(tmp) / "audit.jsonl"))).replace("Path_PO", repr(str(Path(tmp) / "pos")))
-    src = src.replace("def app_script():", "def _main():") + "\n_main()\n"
-    return AppTest.from_string(src, default_timeout=30)
+@pytest.fixture
+def make_app(tmp_path):
+    users = UserStore(tmp_path / "users.json")
+    users.add_user("alice", PASSWORDS["alice"], "requester", "Alice Requester")
+    users.add_user("carol", PASSWORDS["carol"], "requester", "Carol Requester")
+    users.add_user("bob", PASSWORDS["bob"], "approver", "Bob Approver")
+
+    def _make():
+        import inspect
+        import textwrap
+        src = textwrap.dedent(inspect.getsource(app_script))
+        src = src.replace('"DATA_PATH"', repr(str(DATA))).replace('"TMP_DIR"', repr(str(tmp_path)))
+        src = src.replace("def app_script():", "def _main():") + "\n_main()\n"
+        return AppTest.from_string(src, default_timeout=30).run()
+    return _make
 
 
 def btn(at, label):
@@ -38,77 +57,142 @@ def btn(at, label):
     return matches[0] if matches else None
 
 
-def submit_request(at):
-    at.text_area(key="request_text").set_value("I need 50 laptops by Dec 15").run()
+def tab_labels(at):
+    return [t.label for t in at.tabs]
+
+
+def login(at, username, password=None):
+    at.text_input(key="ui_login_user").set_value(username)
+    at.text_input(key="ui_login_pass").set_value(password or PASSWORDS[username])
+    at.button[0].click().run()  # form submit button "Sign in"
+    return at
+
+
+def logout(at):
+    btn(at, "Sign out").click().run()
+    return at
+
+
+def submit_request(at, text="I need 50 laptops by Dec 15"):
+    at.text_area(key="ui_request_text").set_value(text).run()
     btn(at, "Extract details").click().run()
     btn(at, "Confirm and get quotes").click().run()
     btn(at, "Submit for approval").click().run()
     return at
 
 
-def test_full_flow_requires_human_approval(tmp_path):
-    at = make_app(tmp_path).run()
+def test_UI1_login_required(make_app):
+    at = make_app()
     assert not at.exception
-    submit_request(at)
+    assert any("Sign in" in s.value for s in at.subheader)
+    assert at.tabs == [] or len(at.tabs) == 0
+    assert btn(at, "Extract details") is None and btn(at, "Approve") is None
+
+
+def test_UI2_wrong_password_is_rejected(make_app):
+    at = login(make_app(), "alice", "wrong-password")
+    assert any("Invalid username or password" in e.value for e in at.error)
+    assert len(at.tabs) == 0
+
+
+def test_UI3_requester_screen(make_app):
+    at = login(make_app(), "alice")
     assert not at.exception
-    assert any("Submitted for approval" in i.value for i in at.info)
-
-    # U2: nothing is confirmed before approval
-    all_text = " ".join(m.value for m in at.markdown) + " ".join(s.value for s in at.success)
-    assert "Purchase confirmed" not in all_text
-    assert "Awaiting approval" in all_text
-
-    # U1: requester role sees no Approve / Reject
+    assert tab_labels(at) == ["New request", "My requests (0)"]
+    assert any("Requester workspace" in m.value for m in at.markdown)
     assert btn(at, "Approve") is None and btn(at, "Reject") is None
 
-    # approver bob approves
-    at.text_input(key="user_name").set_value("bob").run()
-    at.radio(key="user_role").set_value("approver").run()
-    approve = btn(at, "Approve")
-    assert approve is not None
-    approve.click().run()
-    assert not at.exception
-    assert any("Purchase confirmed with" in s.value for s in at.success)
+
+def test_UI4_approver_screen(make_app):
+    at = login(make_app(), "bob")
+    assert tab_labels(at) == ["Approval queue (0)", "Decision history"]
+    assert any("Approver workspace" in m.value for m in at.markdown)
+    assert btn(at, "Extract details") is None          # approvers do not raise requests
+    assert [m.label for m in at.metric] == ["Waiting for approval", "Value waiting", "Approved", "POs issued"]
 
 
-def test_requester_as_approver_cannot_approve_own_case(tmp_path):
-    at = make_app(tmp_path).run()
-    submit_request(at)
-    at.radio(key="user_role").set_value("approver").run()   # still named alice
-    btn(at, "Approve").click().run()
-    assert any("own request" in e.value for e in at.error)
-    assert not any("Purchase confirmed with" in s.value for s in at.success)
-
-
-def test_reject_requires_comment(tmp_path):
-    at = make_app(tmp_path).run()
-    submit_request(at)
-    at.text_input(key="user_name").set_value("bob").run()
-    at.radio(key="user_role").set_value("approver").run()
-    btn(at, "Reject").click().run()
-    assert any("comment is required" in e.value for e in at.error)
-
-
-def test_incomplete_request_asks_for_details(tmp_path):
-    at = make_app(tmp_path).run()
-    # swap in an extraction with missing fields
-    from fakes import ScriptedLLM
-    at.session_state["agent"]._llm = ScriptedLLM({"product": "monitor", "missing": ["quantity", "required_date"]})
-    at.text_area(key="request_text").set_value("some monitors asap").run()
-    btn(at, "Extract details").click().run()
-    warnings = " ".join(w.value for w in at.warning)
-    assert "Missing: quantity" in warnings and "Missing: required date" in warnings
-    assert btn(at, "Submit for approval") is None
-
-
-def test_po_issued_and_downloadable_after_approval(tmp_path):
-    at = make_app(tmp_path).run()
-    submit_request(at)
+def test_UI5_full_flow_requires_human_approval(make_app, tmp_path):
+    at = submit_request(login(make_app(), "alice"))
+    assert any("Submitted for approval" in i.value for i in at.info)
+    text = " ".join(m.value for m in at.markdown) + " ".join(s.value for s in at.success)
+    assert "Purchase confirmed" not in text
+    assert tab_labels(at)[1] == "My requests (1)"
     assert not (tmp_path / "pos").exists() or not any((tmp_path / "pos").iterdir())
-    at.text_input(key="user_name").set_value("bob").run()
-    at.radio(key="user_role").set_value("approver").run()
+
+    logout(at)
+    assert at.session_state["agent"] is not None              # app objects survive sign-out
+    assert "ui_account" not in at.session_state
+    login(at, "bob")
+    assert tab_labels(at)[0] == "Approval queue (1)"
     btn(at, "Approve").click().run()
     assert not at.exception
     assert any("PO-2026-0001" in s.value for s in at.success)
     assert (tmp_path / "pos" / "PO-2026-0001.pdf").read_bytes().startswith(b"%PDF-")
+    assert tab_labels(at)[0] == "Approval queue (0)"
+
+
+def test_UI6_requester_sees_outcome_and_po(make_app):
+    at = submit_request(login(make_app(), "alice"))
+    logout(at)
+    login(at, "bob")
+    btn(at, "Approve").click().run()
+    logout(at)
+    login(at, "alice")
+    assert any("PO issued" in e.label for e in at.expander)
+    assert any("Purchase order **PO-2026-0001**" in s.value for s in at.success)
     assert len(at.get("download_button")) == 1
+    assert btn(at, "Approve") is None
+
+
+def test_UI7_requesters_see_only_their_own_requests(make_app):
+    at = submit_request(login(make_app(), "alice"))
+    logout(at)
+    login(at, "carol")
+    assert tab_labels(at)[1] == "My requests (0)"
+    assert not any("laptop" in e.label for e in at.expander)
+
+
+def test_UI8_reject_requires_comment(make_app):
+    at = submit_request(login(make_app(), "alice"))
+    logout(at)
+    login(at, "bob")
+    btn(at, "Reject").click().run()
+    assert any("comment is required" in e.value for e in at.error)
+    at.text_input(key=[k for k in at.session_state if str(k).startswith("ui_cmt_")][0]).set_value("Over budget")
+    btn(at, "Reject").click().run()
+    assert tab_labels(at)[0] == "Approval queue (0)"
+    logout(at)
+    login(at, "alice")
+    assert any("Rejected" in e.label for e in at.expander)
+
+
+def test_UI9_data_persists_into_a_new_app_session(make_app):
+    at = submit_request(login(make_app(), "alice"))
+    fresh = login(make_app(), "bob")                 # new session, new service, same database
+    assert tab_labels(fresh)[0] == "Approval queue (1)"
+    btn(fresh, "Approve").click().run()
+    again = login(make_app(), "alice")
+    assert any("PO issued" in e.label for e in again.expander)
+
+
+def test_UI10_approver_cannot_decide_own_case(make_app):
+    at = make_app()
+    from procurement.agent import validate_fields
+    from datetime import date
+    agent, svc = at.session_state["agent"], at.session_state["svc"]
+    req = validate_fields("laptop", 5, date(2026, 12, 15), date(2026, 11, 20)).request
+    svc.submit(agent.recommend(req, date(2026, 11, 20)), "bob")
+    login(at, "bob")
+    assert any("another approver must decide" in w.value for w in at.warning)
+    assert btn(at, "Approve") is None
+
+
+def test_UI11_incomplete_request_asks_for_details(make_app):
+    at = login(make_app(), "alice")
+    from fakes import ScriptedLLM
+    at.session_state["agent"]._llm = ScriptedLLM({"product": "monitor", "missing": ["quantity", "required_date"]})
+    at.text_area(key="ui_request_text").set_value("some monitors asap").run()
+    btn(at, "Extract details").click().run()
+    warnings = " ".join(w.value for w in at.warning)
+    assert "Missing: quantity" in warnings and "Missing: required date" in warnings
+    assert btn(at, "Submit for approval") is None
