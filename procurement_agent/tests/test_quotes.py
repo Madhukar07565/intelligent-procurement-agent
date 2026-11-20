@@ -53,4 +53,5 @@ def test_unrelated_products_do_not_match(repo, today, requested):
 
 
 def test_products_lists_catalog(repo):
-    assert repo.products() == ["laptop", "monitor", "office chair"]
+    assert repo.products() == ["flow meter", "laptop", "level sensor", "monitor", "office chair",
+                               "pressure sensor", "proximity sensor", "temperature sensor"]

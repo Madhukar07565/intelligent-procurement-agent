@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 from .models import Comparison, Decision, PurchaseRequest, Quote, Recommendation, ScoredQuote
 from .po import PurchaseOrder
+from .specs import Requirement
 
 if TYPE_CHECKING:
     from .approval import Case
@@ -28,8 +29,11 @@ def _request_to_dict(r: PurchaseRequest) -> dict:
 
 
 def _request_from_dict(d: dict) -> PurchaseRequest:
+    budget = d.get("max_unit_price")
     return PurchaseRequest(d["product"], int(d["quantity"]), date.fromisoformat(d["required_date"]),
-                           d.get("raw_text", ""), d.get("requester", ""))
+                           d.get("raw_text", ""), d.get("requester", ""),
+                           tuple(Requirement.from_dict(r) for r in d.get("requirements") or []),
+                           float(budget) if budget is not None else None)
 
 
 def recommendation_to_dict(rec: Recommendation) -> dict:

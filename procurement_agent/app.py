@@ -23,7 +23,10 @@ DATA = ROOT / "data"
 
 @st.cache_resource
 def get_agent() -> ProcurementAgent:
-    repo = QuoteRepository(os.getenv("QUOTES_PATH", DATA / "quotes.json"))
+    # Simulated per-supplier catalogue response time, e.g. "0.4,1.2" seconds; "0" turns it off.
+    lo, _, hi = os.getenv("MOCK_SUPPLIER_LATENCY", "0.4,1.2").partition(",")
+    repo = QuoteRepository(os.getenv("QUOTES_PATH", DATA / "quotes.json"),
+                           latency=(float(lo or 0), float(hi or lo or 0)))
     return ProcurementAgent(BedrockClient(), repo)
 
 

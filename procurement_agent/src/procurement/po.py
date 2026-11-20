@@ -35,6 +35,8 @@ class PurchaseOrder:
     approved_at: str
     approval_comment: str
     recommended_supplier: str
+    model: str = ""            # supplier model / part number
+    specification: str = ""    # e.g. '0-150 psi · 4-20 mA · ±0.25% · 1/4" NPT'
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -51,7 +53,7 @@ Issued: {self.issued_at}
 Case: {self.case_id}
 
 ## Supplier
-{self.supplier} (quotation {self.quote_ref})
+{self.supplier} (quotation {self.quote_ref}){f", model {self.model}" if self.model else ""}
 
 ## Order
 | Product | Quantity | Unit price | Total |

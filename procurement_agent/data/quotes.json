@@ -1,10 +1,905 @@
 [
-  {"supplier": "Acme Supplies", "product": "laptop", "unit_price": 950.0, "currency": "USD", "lead_time_days": 10, "valid_until": "2027-12-31", "quote_ref": "ACM-1001"},
-  {"supplier": "TechWorld", "product": "laptop", "unit_price": 899.0, "currency": "USD", "lead_time_days": 21, "valid_until": "2027-12-31", "quote_ref": "TWD-2001"},
-  {"supplier": "QuickShip Ltd", "product": "laptop", "unit_price": 1020.0, "currency": "USD", "lead_time_days": 5, "valid_until": "2027-12-31", "quote_ref": "QSL-3001"},
-  {"supplier": "OldDeals Inc", "product": "laptop", "unit_price": 800.0, "currency": "USD", "lead_time_days": 7, "valid_until": "2026-01-31", "quote_ref": "ODI-4001"},
-  {"supplier": "Acme Supplies", "product": "monitor", "unit_price": 210.0, "currency": "USD", "lead_time_days": 7, "valid_until": "2027-12-31", "quote_ref": "ACM-1002"},
-  {"supplier": "TechWorld", "product": "monitor", "unit_price": 195.0, "currency": "USD", "lead_time_days": 14, "valid_until": "2027-12-31", "quote_ref": "TWD-2002"},
-  {"supplier": "OfficePro", "product": "office chair", "unit_price": 140.0, "currency": "USD", "lead_time_days": 12, "valid_until": "2027-12-31", "quote_ref": "OFP-5001"},
-  {"supplier": "QuickShip Ltd", "product": "office chair", "unit_price": 165.0, "currency": "USD", "lead_time_days": 4, "valid_until": "2027-12-31", "quote_ref": "QSL-3002"}
+ {
+  "supplier": "Acme Supplies",
+  "product": "laptop",
+  "unit_price": 950.0,
+  "currency": "USD",
+  "lead_time_days": 10,
+  "valid_until": "2027-12-31",
+  "quote_ref": "ACM-1001"
+ },
+ {
+  "supplier": "TechWorld",
+  "product": "laptop",
+  "unit_price": 899.0,
+  "currency": "USD",
+  "lead_time_days": 21,
+  "valid_until": "2027-12-31",
+  "quote_ref": "TWD-2001"
+ },
+ {
+  "supplier": "QuickShip Ltd",
+  "product": "laptop",
+  "unit_price": 1020.0,
+  "currency": "USD",
+  "lead_time_days": 5,
+  "valid_until": "2027-12-31",
+  "quote_ref": "QSL-3001"
+ },
+ {
+  "supplier": "OldDeals Inc",
+  "product": "laptop",
+  "unit_price": 800.0,
+  "currency": "USD",
+  "lead_time_days": 7,
+  "valid_until": "2026-01-31",
+  "quote_ref": "ODI-4001"
+ },
+ {
+  "supplier": "Acme Supplies",
+  "product": "monitor",
+  "unit_price": 210.0,
+  "currency": "USD",
+  "lead_time_days": 7,
+  "valid_until": "2027-12-31",
+  "quote_ref": "ACM-1002"
+ },
+ {
+  "supplier": "TechWorld",
+  "product": "monitor",
+  "unit_price": 195.0,
+  "currency": "USD",
+  "lead_time_days": 14,
+  "valid_until": "2027-12-31",
+  "quote_ref": "TWD-2002"
+ },
+ {
+  "supplier": "OfficePro",
+  "product": "office chair",
+  "unit_price": 140.0,
+  "currency": "USD",
+  "lead_time_days": 12,
+  "valid_until": "2027-12-31",
+  "quote_ref": "OFP-5001"
+ },
+ {
+  "supplier": "QuickShip Ltd",
+  "product": "office chair",
+  "unit_price": 165.0,
+  "currency": "USD",
+  "lead_time_days": 4,
+  "valid_until": "2027-12-31",
+  "quote_ref": "QSL-3002"
+ },
+ {
+  "supplier": "DwyerOmega",
+  "supplier_site": "dwyeromega.com",
+  "product": "pressure sensor",
+  "model": "PX309-150GI",
+  "description": "Pressure transducer, stainless steel, 4-20 mA",
+  "unit_price": 245.0,
+  "price_breaks": [
+   [
+    50,
+    229.0
+   ],
+   [
+    100,
+    215.0
+   ]
+  ],
+  "currency": "USD",
+  "lead_time_days": 12,
+  "in_stock": 180,
+  "stock_lead_days": 3,
+  "min_order_qty": 1,
+  "valid_until": "2027-06-30",
+  "quote_ref": "DO-PX309-150",
+  "specs": {
+   "range_max": "150 psi",
+   "output": "4-20 mA",
+   "accuracy_pct": 0.25,
+   "connection": "1/4\" NPT",
+   "ip_rating": "IP65",
+   "temp_max": 85
+  },
+  "simulated": true
+ },
+ {
+  "supplier": "DwyerOmega",
+  "supplier_site": "dwyeromega.com",
+  "product": "pressure sensor",
+  "model": "PX409-150GI",
+  "description": "High-accuracy pressure transducer, 4-20 mA",
+  "unit_price": 595.0,
+  "price_breaks": [
+   [
+    50,
+    559.0
+   ],
+   [
+    100,
+    535.0
+   ]
+  ],
+  "currency": "USD",
+  "lead_time_days": 10,
+  "in_stock": 40,
+  "stock_lead_days": 3,
+  "min_order_qty": 1,
+  "valid_until": "2027-06-30",
+  "quote_ref": "DO-PX409-150",
+  "specs": {
+   "range_max": "150 psi",
+   "output": "4-20 mA",
+   "accuracy_pct": 0.08,
+   "connection": "1/4\" NPT",
+   "ip_rating": "IP67",
+   "temp_max": 85
+  },
+  "simulated": true
+ },
+ {
+  "supplier": "DwyerOmega",
+  "supplier_site": "dwyeromega.com",
+  "product": "pressure sensor",
+  "model": "626-07-GH-P1-E1-S1",
+  "description": "Industrial pressure transmitter, 0-100 psi",
+  "unit_price": 212.0,
+  "price_breaks": [
+   [
+    100,
+    195.0
+   ]
+  ],
+  "currency": "USD",
+  "lead_time_days": 8,
+  "in_stock": 300,
+  "stock_lead_days": 3,
+  "min_order_qty": 1,
+  "valid_until": "2027-06-30",
+  "quote_ref": "DO-626-100",
+  "specs": {
+   "range_max": "100 psi",
+   "output": "4-20 mA",
+   "accuracy_pct": 0.25,
+   "connection": "1/4\" NPT",
+   "ip_rating": "IP66",
+   "temp_max": 93
+  },
+  "simulated": true
+ },
+ {
+  "supplier": "Siemens",
+  "supplier_site": "siemens.com",
+  "product": "pressure sensor",
+  "model": "SITRANS P220 7MF1567-3DB00",
+  "description": "Pressure transmitter, 0-16 bar, 4-20 mA",
+  "unit_price": 365.0,
+  "price_breaks": [
+   [
+    50,
+    342.0
+   ],
+   [
+    100,
+    329.0
+   ]
+  ],
+  "currency": "USD",
+  "lead_time_days": 21,
+  "in_stock": 0,
+  "stock_lead_days": 0,
+  "min_order_qty": 10,
+  "valid_until": "2027-06-30",
+  "quote_ref": "SI-P220-16",
+  "specs": {
+   "range_max": "16 bar",
+   "output": "4-20 mA",
+   "accuracy_pct": 0.25,
+   "connection": "1/4\" NPT",
+   "ip_rating": "IP67",
+   "temp_max": 120
+  },
+  "simulated": true
+ },
+ {
+  "supplier": "Siemens",
+  "supplier_site": "siemens.com",
+  "product": "pressure sensor",
+  "model": "SITRANS P200 7MF1565-3CA00",
+  "description": "Pressure transmitter, 0-10 bar",
+  "unit_price": 298.0,
+  "price_breaks": [
+   [
+    100,
+    276.0
+   ]
+  ],
+  "currency": "USD",
+  "lead_time_days": 18,
+  "in_stock": 0,
+  "stock_lead_days": 0,
+  "min_order_qty": 10,
+  "valid_until": "2027-06-30",
+  "quote_ref": "SI-P200-10",
+  "specs": {
+   "range_max": "10 bar",
+   "output": "4-20 mA",
+   "accuracy_pct": 0.25,
+   "connection": "1/4\" NPT",
+   "ip_rating": "IP65",
+   "temp_max": 90
+  },
+  "simulated": true
+ },
+ {
+  "supplier": "Siemens",
+  "supplier_site": "siemens.com",
+  "product": "pressure sensor",
+  "model": "SITRANS P320 7MF0300",
+  "description": "Smart pressure transmitter, HART",
+  "unit_price": 1480.0,
+  "price_breaks": [
+   [
+    50,
+    1395.0
+   ]
+  ],
+  "currency": "USD",
+  "lead_time_days": 28,
+  "in_stock": 0,
+  "stock_lead_days": 0,
+  "min_order_qty": 1,
+  "valid_until": "2027-06-30",
+  "quote_ref": "SI-P320-HART",
+  "specs": {
+   "range_max": "250 psi",
+   "output": "4-20 mA HART",
+   "accuracy_pct": 0.065,
+   "connection": "1/2\" NPT",
+   "ip_rating": "IP68",
+   "temp_max": 125
+  },
+  "simulated": true
+ },
+ {
+  "supplier": "WIKA",
+  "supplier_site": "wika.com",
+  "product": "pressure sensor",
+  "model": "A-10 (0-160 psi)",
+  "description": "General-purpose pressure transmitter",
+  "unit_price": 172.0,
+  "price_breaks": [
+   [
+    100,
+    158.0
+   ]
+  ],
+  "currency": "USD",
+  "lead_time_days": 14,
+  "in_stock": 500,
+  "stock_lead_days": 4,
+  "min_order_qty": 1,
+  "valid_until": "2027-06-30",
+  "quote_ref": "WI-A10-160",
+  "specs": {
+   "range_max": "160 psi",
+   "output": "4-20 mA",
+   "accuracy_pct": 0.5,
+   "connection": "1/4\" NPT",
+   "ip_rating": "IP65",
+   "temp_max": 80
+  },
+  "simulated": true
+ },
+ {
+  "supplier": "WIKA",
+  "supplier_site": "wika.com",
+  "product": "pressure sensor",
+  "model": "S-20 (0-150 psi)",
+  "description": "Superior pressure transmitter, 0.25%",
+  "unit_price": 289.0,
+  "price_breaks": [
+   [
+    50,
+    272.0
+   ],
+   [
+    100,
+    259.0
+   ]
+  ],
+  "currency": "USD",
+  "lead_time_days": 16,
+  "in_stock": 60,
+  "stock_lead_days": 4,
+  "min_order_qty": 1,
+  "valid_until": "2027-06-30",
+  "quote_ref": "WI-S20-150",
+  "specs": {
+   "range_max": "150 psi",
+   "output": "4-20 mA",
+   "accuracy_pct": 0.25,
+   "connection": "1/4\" NPT",
+   "ip_rating": "IP67",
+   "temp_max": 85
+  },
+  "simulated": true
+ },
+ {
+  "supplier": "Honeywell",
+  "supplier_site": "honeywell.com",
+  "product": "pressure sensor",
+  "model": "MLH150PGL01A",
+  "description": "Heavy-duty pressure sensor, ratiometric output",
+  "unit_price": 118.0,
+  "price_breaks": [
+   [
+    100,
+    104.0
+   ]
+  ],
+  "currency": "USD",
+  "lead_time_days": 9,
+  "in_stock": 1200,
+  "stock_lead_days": 2,
+  "min_order_qty": 1,
+  "valid_until": "2027-06-30",
+  "quote_ref": "HW-MLH150",
+  "specs": {
+   "range_max": "150 psi",
+   "output": "0.5-4.5 V",
+   "accuracy_pct": 0.25,
+   "connection": "1/4\" NPT",
+   "ip_rating": "IP67",
+   "temp_max": 125
+  },
+  "simulated": true
+ },
+ {
+  "supplier": "Honeywell",
+  "supplier_site": "honeywell.com",
+  "product": "pressure sensor",
+  "model": "PX2AN1XX150PSCHX",
+  "description": "Heavy-duty pressure transducer, 4-20 mA",
+  "unit_price": 164.0,
+  "price_breaks": [
+   [
+    100,
+    149.0
+   ]
+  ],
+  "currency": "USD",
+  "lead_time_days": 20,
+  "in_stock": 0,
+  "stock_lead_days": 0,
+  "min_order_qty": 25,
+  "valid_until": "2027-06-30",
+  "quote_ref": "HW-PX2-150C",
+  "specs": {
+   "range_max": "150 psi",
+   "output": "4-20 mA",
+   "accuracy_pct": 0.25,
+   "connection": "1/4\" NPT",
+   "ip_rating": "IP69K",
+   "temp_max": 125
+  },
+  "simulated": true
+ },
+ {
+  "supplier": "Emerson",
+  "supplier_site": "emerson.com",
+  "product": "pressure sensor",
+  "model": "Rosemount 2051TG",
+  "description": "In-line gauge pressure transmitter, HART",
+  "unit_price": 1190.0,
+  "price_breaks": [
+   [
+    50,
+    1120.0
+   ]
+  ],
+  "currency": "USD",
+  "lead_time_days": 25,
+  "in_stock": 0,
+  "stock_lead_days": 0,
+  "min_order_qty": 1,
+  "valid_until": "2027-06-30",
+  "quote_ref": "EM-2051TG",
+  "specs": {
+   "range_max": "300 psi",
+   "output": "4-20 mA HART",
+   "accuracy_pct": 0.065,
+   "connection": "1/2\" NPT",
+   "ip_rating": "IP66",
+   "temp_max": 121
+  },
+  "simulated": true
+ },
+ {
+  "supplier": "Emerson",
+  "supplier_site": "emerson.com",
+  "product": "pressure sensor",
+  "model": "Rosemount 3051TG",
+  "description": "Premium in-line pressure transmitter, HART",
+  "unit_price": 1650.0,
+  "price_breaks": [],
+  "currency": "USD",
+  "lead_time_days": 30,
+  "in_stock": 0,
+  "stock_lead_days": 0,
+  "min_order_qty": 1,
+  "valid_until": "2027-06-30",
+  "quote_ref": "EM-3051TG",
+  "specs": {
+   "range_max": "150 psi",
+   "output": "4-20 mA HART",
+   "accuracy_pct": 0.04,
+   "connection": "1/4\" NPT",
+   "ip_rating": "IP68",
+   "temp_max": 121
+  },
+  "simulated": true
+ },
+ {
+  "supplier": "DwyerOmega",
+  "supplier_site": "dwyeromega.com",
+  "product": "temperature sensor",
+  "model": "PR-21-2-100-1/4-6-E",
+  "description": "Pt100 RTD probe, class A, 1/4 NPT",
+  "unit_price": 74.0,
+  "price_breaks": [
+   [
+    50,
+    66.0
+   ]
+  ],
+  "currency": "USD",
+  "lead_time_days": 7,
+  "in_stock": 400,
+  "stock_lead_days": 2,
+  "min_order_qty": 1,
+  "valid_until": "2027-06-30",
+  "quote_ref": "DO-PR21-6",
+  "specs": {
+   "sensor_type": "Pt100 RTD",
+   "range_max": 260,
+   "accuracy_class": "Class A",
+   "connection": "1/4\" NPT",
+   "probe_length": "6 in"
+  },
+  "simulated": true
+ },
+ {
+  "supplier": "DwyerOmega",
+  "supplier_site": "dwyeromega.com",
+  "product": "temperature sensor",
+  "model": "KQXL-14U-6",
+  "description": "Type K thermocouple probe",
+  "unit_price": 38.0,
+  "price_breaks": [
+   [
+    50,
+    33.0
+   ]
+  ],
+  "currency": "USD",
+  "lead_time_days": 5,
+  "in_stock": 900,
+  "stock_lead_days": 2,
+  "min_order_qty": 1,
+  "valid_until": "2027-06-30",
+  "quote_ref": "DO-KQXL-6",
+  "specs": {
+   "sensor_type": "Type K thermocouple",
+   "range_max": 1100,
+   "accuracy_class": "Standard",
+   "connection": "1/4\" NPT",
+   "probe_length": "6 in"
+  },
+  "simulated": true
+ },
+ {
+  "supplier": "Siemens",
+  "supplier_site": "siemens.com",
+  "product": "temperature sensor",
+  "model": "SITRANS TS500 7MC7500",
+  "description": "Pt100 RTD assembly with thermowell",
+  "unit_price": 218.0,
+  "price_breaks": [
+   [
+    50,
+    204.0
+   ]
+  ],
+  "currency": "USD",
+  "lead_time_days": 21,
+  "in_stock": 0,
+  "stock_lead_days": 0,
+  "min_order_qty": 5,
+  "valid_until": "2027-06-30",
+  "quote_ref": "SI-TS500",
+  "specs": {
+   "sensor_type": "Pt100 RTD",
+   "range_max": 600,
+   "accuracy_class": "Class A",
+   "connection": "1/2\" NPT",
+   "probe_length": "150 mm"
+  },
+  "simulated": true
+ },
+ {
+  "supplier": "WIKA",
+  "supplier_site": "wika.com",
+  "product": "temperature sensor",
+  "model": "TR10-C",
+  "description": "Pt100 RTD screw-in thermometer",
+  "unit_price": 142.0,
+  "price_breaks": [
+   [
+    50,
+    131.0
+   ]
+  ],
+  "currency": "USD",
+  "lead_time_days": 12,
+  "in_stock": 120,
+  "stock_lead_days": 4,
+  "min_order_qty": 1,
+  "valid_until": "2027-06-30",
+  "quote_ref": "WI-TR10",
+  "specs": {
+   "sensor_type": "Pt100 RTD",
+   "range_max": 250,
+   "accuracy_class": "Class A",
+   "connection": "1/4\" NPT",
+   "probe_length": "160 mm"
+  },
+  "simulated": true
+ },
+ {
+  "supplier": "Emerson",
+  "supplier_site": "emerson.com",
+  "product": "temperature sensor",
+  "model": "Rosemount 214C",
+  "description": "Pt100 RTD sensor, class A",
+  "unit_price": 265.0,
+  "price_breaks": [],
+  "currency": "USD",
+  "lead_time_days": 24,
+  "in_stock": 0,
+  "stock_lead_days": 0,
+  "min_order_qty": 1,
+  "valid_until": "2027-06-30",
+  "quote_ref": "EM-214C",
+  "specs": {
+   "sensor_type": "Pt100 RTD",
+   "range_max": 450,
+   "accuracy_class": "Class A",
+   "connection": "1/2\" NPT",
+   "probe_length": "6 in"
+  },
+  "simulated": true
+ },
+ {
+  "supplier": "DwyerOmega",
+  "supplier_site": "dwyeromega.com",
+  "product": "flow meter",
+  "model": "FMG91-PVDF-2",
+  "description": "Electromagnetic flow meter, 2 in",
+  "unit_price": 1460.0,
+  "price_breaks": [
+   [
+    5,
+    1390.0
+   ]
+  ],
+  "currency": "USD",
+  "lead_time_days": 14,
+  "in_stock": 12,
+  "stock_lead_days": 4,
+  "min_order_qty": 1,
+  "valid_until": "2027-06-30",
+  "quote_ref": "DO-FMG91-2",
+  "specs": {
+   "meter_type": "magnetic",
+   "pipe_size": "2 in",
+   "output": "4-20 mA",
+   "accuracy_pct": 0.5,
+   "ip_rating": "IP67"
+  },
+  "simulated": true
+ },
+ {
+  "supplier": "Siemens",
+  "supplier_site": "siemens.com",
+  "product": "flow meter",
+  "model": "SITRANS FM MAG 5100 W DN50",
+  "description": "Electromagnetic flow sensor with MAG 5000",
+  "unit_price": 2380.0,
+  "price_breaks": [
+   [
+    5,
+    2260.0
+   ]
+  ],
+  "currency": "USD",
+  "lead_time_days": 28,
+  "in_stock": 0,
+  "stock_lead_days": 0,
+  "min_order_qty": 1,
+  "valid_until": "2027-06-30",
+  "quote_ref": "SI-MAG5100W-2",
+  "specs": {
+   "meter_type": "magnetic",
+   "pipe_size": "2 in",
+   "output": "4-20 mA HART",
+   "accuracy_pct": 0.4,
+   "ip_rating": "IP67"
+  },
+  "simulated": true
+ },
+ {
+  "supplier": "Emerson",
+  "supplier_site": "emerson.com",
+  "product": "flow meter",
+  "model": "Rosemount 8705 (2 in)",
+  "description": "Magnetic flow meter sensor and transmitter",
+  "unit_price": 3150.0,
+  "price_breaks": [],
+  "currency": "USD",
+  "lead_time_days": 35,
+  "in_stock": 0,
+  "stock_lead_days": 0,
+  "min_order_qty": 1,
+  "valid_until": "2027-06-30",
+  "quote_ref": "EM-8705-2",
+  "specs": {
+   "meter_type": "magnetic",
+   "pipe_size": "2 in",
+   "output": "4-20 mA HART",
+   "accuracy_pct": 0.25,
+   "ip_rating": "IP68"
+  },
+  "simulated": true
+ },
+ {
+  "supplier": "Emerson",
+  "supplier_site": "emerson.com",
+  "product": "flow meter",
+  "model": "Rosemount 8800 Vortex (2 in)",
+  "description": "Vortex flow meter",
+  "unit_price": 2890.0,
+  "price_breaks": [],
+  "currency": "USD",
+  "lead_time_days": 32,
+  "in_stock": 0,
+  "stock_lead_days": 0,
+  "min_order_qty": 1,
+  "valid_until": "2027-06-30",
+  "quote_ref": "EM-8800-2",
+  "specs": {
+   "meter_type": "vortex",
+   "pipe_size": "2 in",
+   "output": "4-20 mA HART",
+   "accuracy_pct": 0.65,
+   "ip_rating": "IP66"
+  },
+  "simulated": true
+ },
+ {
+  "supplier": "Siemens",
+  "supplier_site": "siemens.com",
+  "product": "level sensor",
+  "model": "SITRANS LR100 7ML5432",
+  "description": "80 GHz radar level transmitter, 8 m",
+  "unit_price": 895.0,
+  "price_breaks": [
+   [
+    10,
+    845.0
+   ]
+  ],
+  "currency": "USD",
+  "lead_time_days": 20,
+  "in_stock": 0,
+  "stock_lead_days": 0,
+  "min_order_qty": 1,
+  "valid_until": "2027-06-30",
+  "quote_ref": "SI-LR100",
+  "specs": {
+   "sensor_type": "radar",
+   "range_max": "8 m",
+   "output": "4-20 mA",
+   "ip_rating": "IP68"
+  },
+  "simulated": true
+ },
+ {
+  "supplier": "Emerson",
+  "supplier_site": "emerson.com",
+  "product": "level sensor",
+  "model": "Rosemount 1208",
+  "description": "Non-contacting radar level and flow transmitter",
+  "unit_price": 1060.0,
+  "price_breaks": [],
+  "currency": "USD",
+  "lead_time_days": 22,
+  "in_stock": 0,
+  "stock_lead_days": 0,
+  "min_order_qty": 1,
+  "valid_until": "2027-06-30",
+  "quote_ref": "EM-1208",
+  "specs": {
+   "sensor_type": "radar",
+   "range_max": "15 m",
+   "output": "4-20 mA HART",
+   "ip_rating": "IP68"
+  },
+  "simulated": true
+ },
+ {
+  "supplier": "DwyerOmega",
+  "supplier_site": "dwyeromega.com",
+  "product": "level sensor",
+  "model": "ULS-6 Ultrasonic",
+  "description": "Ultrasonic level transmitter, 6 m",
+  "unit_price": 468.0,
+  "price_breaks": [
+   [
+    10,
+    439.0
+   ]
+  ],
+  "currency": "USD",
+  "lead_time_days": 9,
+  "in_stock": 25,
+  "stock_lead_days": 3,
+  "min_order_qty": 1,
+  "valid_until": "2027-06-30",
+  "quote_ref": "DO-ULS-6",
+  "specs": {
+   "sensor_type": "ultrasonic",
+   "range_max": "6 m",
+   "output": "4-20 mA",
+   "ip_rating": "IP67"
+  },
+  "simulated": true
+ },
+ {
+  "supplier": "WIKA",
+  "supplier_site": "wika.com",
+  "product": "level sensor",
+  "model": "LRT-1 (radar)",
+  "description": "Radar level transmitter",
+  "unit_price": 990.0,
+  "price_breaks": [],
+  "currency": "USD",
+  "lead_time_days": 26,
+  "in_stock": 0,
+  "stock_lead_days": 0,
+  "min_order_qty": 1,
+  "valid_until": "2027-06-30",
+  "quote_ref": "WI-LRT",
+  "specs": {
+   "sensor_type": "radar",
+   "range_max": "30 m",
+   "output": "4-20 mA HART",
+   "ip_rating": "IP67"
+  },
+  "simulated": true
+ },
+ {
+  "supplier": "Siemens",
+  "supplier_site": "siemens.com",
+  "product": "proximity sensor",
+  "model": "SIMATIC PXI 3RG4613",
+  "description": "Inductive proximity switch, M18, PNP",
+  "unit_price": 41.0,
+  "price_breaks": [
+   [
+    100,
+    36.5
+   ]
+  ],
+  "currency": "USD",
+  "lead_time_days": 10,
+  "in_stock": 0,
+  "stock_lead_days": 0,
+  "min_order_qty": 10,
+  "valid_until": "2027-06-30",
+  "quote_ref": "SI-3RG4",
+  "specs": {
+   "sensing_distance": "8 mm",
+   "output": "PNP NO",
+   "housing": "M18",
+   "ip_rating": "IP67"
+  },
+  "simulated": true
+ },
+ {
+  "supplier": "Honeywell",
+  "supplier_site": "honeywell.com",
+  "product": "proximity sensor",
+  "model": "922FS8A-A4P-L",
+  "description": "Inductive proximity sensor, M18, PNP",
+  "unit_price": 44.0,
+  "price_breaks": [
+   [
+    100,
+    39.0
+   ]
+  ],
+  "currency": "USD",
+  "lead_time_days": 6,
+  "in_stock": 800,
+  "stock_lead_days": 2,
+  "min_order_qty": 1,
+  "valid_until": "2027-06-30",
+  "quote_ref": "HW-922",
+  "specs": {
+   "sensing_distance": "8 mm",
+   "output": "PNP NO",
+   "housing": "M18",
+   "ip_rating": "IP67"
+  },
+  "simulated": true
+ },
+ {
+  "supplier": "DwyerOmega",
+  "supplier_site": "dwyeromega.com",
+  "product": "proximity sensor",
+  "model": "PRX-M18-8P",
+  "description": "Inductive proximity sensor, M18, PNP",
+  "unit_price": 29.5,
+  "price_breaks": [
+   [
+    100,
+    26.0
+   ]
+  ],
+  "currency": "USD",
+  "lead_time_days": 5,
+  "in_stock": 1500,
+  "stock_lead_days": 2,
+  "min_order_qty": 1,
+  "valid_until": "2027-06-30",
+  "quote_ref": "DO-PRX18",
+  "specs": {
+   "sensing_distance": "8 mm",
+   "output": "PNP NO",
+   "housing": "M18",
+   "ip_rating": "IP67"
+  },
+  "simulated": true
+ },
+ {
+  "supplier": "Honeywell",
+  "supplier_site": "honeywell.com",
+  "product": "proximity sensor",
+  "model": "922FS5A-A4N-L",
+  "description": "Inductive proximity sensor, M12, NPN",
+  "unit_price": 36.0,
+  "price_breaks": [
+   [
+    100,
+    32.0
+   ]
+  ],
+  "currency": "USD",
+  "lead_time_days": 6,
+  "in_stock": 600,
+  "stock_lead_days": 2,
+  "min_order_qty": 1,
+  "valid_until": "2027-06-30",
+  "quote_ref": "HW-922-NPN",
+  "specs": {
+   "sensing_distance": "4 mm",
+   "output": "NPN NO",
+   "housing": "M12",
+   "ip_rating": "IP67"
+  },
+  "simulated": true
+ }
 ]

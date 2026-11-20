@@ -5,6 +5,8 @@ from dataclasses import dataclass, field, asdict
 from datetime import date
 from typing import Any
 
+from .specs import Requirement
+
 
 @dataclass(frozen=True)
 class PurchaseRequest:
@@ -13,10 +15,13 @@ class PurchaseRequest:
     required_date: date
     raw_text: str = ""
     requester: str = ""
+    requirements: tuple[Requirement, ...] = ()   # technical specs, checked by specs.check
+    max_unit_price: float | None = None          # budget per unit, in the quote currency
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
         d["required_date"] = self.required_date.isoformat()
+        d["requirements"] = [r.to_dict() for r in self.requirements]
         return d
 
 
@@ -31,11 +36,24 @@ class Quote:
     lead_time_days: int
     delivery_date: date
     valid_until: date
+    model: str = ""
+    description: str = ""
+    supplier_site: str = ""
+    specs: tuple[tuple[str, Any], ...] = ()      # (key, value) pairs; a tuple keeps the dataclass hashable
+    checks: tuple[tuple[str, bool, str], ...] = ()  # (label, ok, detail) against the request's requirements
+    simulated: bool = False
+    from_stock: bool = False
+
+    @property
+    def spec_dict(self) -> dict[str, Any]:
+        return dict(self.specs)
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
         d["delivery_date"] = self.delivery_date.isoformat()
         d["valid_until"] = self.valid_until.isoformat()
+        d["specs"] = dict(self.specs)
+        d["checks"] = [{"label": a, "ok": b, "detail": c} for a, b, c in self.checks]
         return d
 
     @staticmethod
@@ -50,6 +68,13 @@ class Quote:
             lead_time_days=int(d["lead_time_days"]),
             delivery_date=date.fromisoformat(d["delivery_date"]),
             valid_until=date.fromisoformat(d["valid_until"]),
+            model=d.get("model", ""),
+            description=d.get("description", ""),
+            supplier_site=d.get("supplier_site", ""),
+            specs=tuple((d.get("specs") or {}).items()),
+            checks=tuple((c["label"], bool(c["ok"]), c["detail"]) for c in d.get("checks") or []),
+            simulated=bool(d.get("simulated", False)),
+            from_stock=bool(d.get("from_stock", False)),
         )
 
 
@@ -63,7 +88,9 @@ class ScoredQuote:
     def to_dict(self) -> dict[str, Any]:
         return {
             "supplier": self.quote.supplier,
+            "model": self.quote.model,
             "quote_ref": self.quote.quote_ref,
+            "unit_price": self.quote.unit_price,
             "total_price": self.quote.total_price,
             "currency": self.quote.currency,
             "delivery_date": self.quote.delivery_date.isoformat(),

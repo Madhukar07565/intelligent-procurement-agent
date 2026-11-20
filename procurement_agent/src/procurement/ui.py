@@ -18,12 +18,19 @@ from .approval import APPROVED, APPROVER, PENDING, PO_ISSUED, REJECTED, REQUESTE
 from .auth import Account, AuthError, UserStore
 from .notifications import AlertStore
 from .models import Recommendation, ScoredQuote
+from .specs import SCHEMA, parse_requirements, summarize_specs
 
 EXAMPLES = [
-    ("💻  50 laptops by Dec 15", "I need 50 laptops delivered by December 15"),
-    ("🖥️  10 monitors by Dec 20", "We need 10 monitors by December 20"),
-    ("🪑  15 office chairs by Jan 10", "Order 15 office chairs by January 10"),
+    ("🔧  100 pressure sensors", "Our company needs to purchase 100 pressure sensors to manufacture its products: "
+                                 "0-150 psi, 4-20 mA output, 1/4 inch NPT, needed by January 15"),
+    ("🌡️  40 Pt100 RTD probes", "We need 40 Pt100 RTD temperature probes rated to at least 200 C, 1/4 NPT, "
+                                "by December 20, budget $150 each"),
+    ("💧  6 magnetic flow meters", "Buy 6 magnetic flow meters for 2 inch pipe, accuracy 0.5% or better, "
+                                  "4-20 mA output, by January 30"),
+    ("🧲  200 proximity sensors", "200 inductive proximity sensors, M18 housing, PNP output, 8 mm sensing "
+                                 "distance, IP67, by December 10"),
 ]
+SIMULATED_NOTE = "Simulated supplier catalogues: real supplier names, mocked prices, stock and lead times."
 STEPS = ["Describe the need", "Confirm details", "Compare suppliers", "Submit for approval"]
 
 STATUS_LABEL = {
@@ -139,6 +146,13 @@ header[data-testid="stHeader"] {background: transparent;}
 .pa-empty {background: #fff; border: 1px dashed #cbd5e1; border-radius: 14px; padding: 28px; text-align: center;
   color: #64748b;}
 .pa-empty .i {font-size: 2rem;}
+.pa-model {font-size: .95rem; color: #334155; margin-top: 2px;}
+.pa-model code {background: #eef2ff; color: #3730a3; padding: 1px 6px; border-radius: 6px;}
+.pa-checks {display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px;}
+.pa-check {background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46; border-radius: 999px;
+  padding: 3px 10px; font-size: .8rem; font-weight: 700;}
+.pa-check.no {background: #fef2f2; border-color: #fecaca; color: #991b1b;}
+.pa-sim {font-size: .75rem; color: #64748b;}
 .pa-alerts {background: linear-gradient(135deg, #fff7ed 0%, #ffffff 80%); border: 1px solid #fdba74;
   border-left: 6px solid #f97316; border-radius: 14px; padding: 14px 18px; margin: 4px 0 14px;}
 .pa-alerts .h {font-weight: 800; color: #9a3412; font-size: 1.05rem; margin-bottom: 6px;}
@@ -207,11 +221,19 @@ def _winner_card(rec: Recommendation) -> None:
     ]
     kpi_html = "".join(f'<div class="pa-kpi"><div class="k">{esc(k)}</div><div class="v">{esc(v)}</div></div>'
                        for k, v in kpis)
+    model = ""
+    if q.model:
+        site = f" · {esc(q.supplier_site)}" if q.supplier_site else ""
+        stock = " · in stock" if q.from_stock else ""
+        model = f'<div class="pa-model">Model <code>{esc(q.model)}</code>{site}{esc(stock)}</div>'
+    checks = "".join(f'<span class="pa-check{"" if ok else " no"}">{"✓" if ok else "✗"} {esc(label)}</span>'
+                     for label, ok, _ in q.checks)
+    checks_html = f'<div class="pa-checks">{checks}</div>' if checks else ""
     _html(
         f'<div class="{card_cls}"><div class="top">{badge}{score}</div>'
-        f'<div class="name">{esc(q.supplier)}</div>'
+        f'<div class="name">{esc(q.supplier)}</div>{model}'
         f'<div class="why">{esc(why)} Quotation {esc(q.quote_ref)}, valid until {esc(q.valid_until.isoformat())}.</div>'
-        f'<div class="pa-kpis">{kpi_html}</div></div>'
+        f'<div class="pa-kpis">{kpi_html}</div>{checks_html}</div>'
     )
 
 
@@ -234,7 +256,8 @@ def _alternative_cards(rec: Recommendation) -> None:
             _html(
                 f'<div class="pa-alt"><div class="name">#{i + 2} {esc(q.supplier)}'
                 f'<span class="pa-pill {pill_cls}">{esc(timing)}</span></div>'
-                f'<div class="row">Total <b>{esc(_money(q.total_price, q.currency))}</b></div>'
+                + (f'<div class="row">Model <b>{esc(q.model)}</b></div>' if q.model else "")
+                + f'<div class="row">Total <b>{esc(_money(q.total_price, q.currency))}</b></div>'
                 f'<div class="row">Delivery <b>{esc(q.delivery_date.isoformat())}</b></div>'
                 f'<div class="row">Score <b>{esc(score)}</b></div></div>'
             )
@@ -289,8 +312,14 @@ def _ranking_table(rec: Recommendation) -> None:
     rows = []
     for i, s in enumerate(rec.comparison.ranked, start=1):
         q = s.quote
+        row = {"Rank": i, "Supplier": q.supplier}
+        if q.model:
+            row["Model"] = q.model
+            row["Specs"] = summarize_specs(q.product, q.spec_dict)
+        if q.checks:
+            row["Meets specs"] = "✅ All" if all(ok for _, ok, _ in q.checks) else "❌"
         rows.append({
-            "Rank": i, "Supplier": q.supplier, "Total price": q.total_price, "Unit price": q.unit_price,
+            **row, "Total price": q.total_price, "Unit price": q.unit_price,
             "Delivery date": q.delivery_date.isoformat(),
             "On time": "✅ Yes" if s.eligible else f"❌ {s.days_late} day(s) late",
             "Score": round(s.score, 1) if s.eligible else None, "Quote ref": q.quote_ref,
@@ -307,13 +336,23 @@ def _ranking_table(rec: Recommendation) -> None:
     )
 
 
+def _excluded_list(rec: Recommendation) -> None:
+    if not rec.excluded:
+        return
+    with st.expander(f"Models that do not fit ({len(rec.excluded)})"):
+        for e in rec.excluded:
+            st.markdown(f"- **{e['supplier']}** · {e['reason']}")
+
+
 def _show_recommendation(rec: Recommendation, available_products: list[str] | None = None,
                          full: bool = True) -> None:
     """full=True adds alternative cards and charts (requester view); compact otherwise."""
     if rec.comparison.recommended is None:
-        st.error(f"No quotations are available for \"{rec.request.product}\".")
-        for e in rec.excluded:
-            st.caption(f"Excluded: {e['supplier']} ({e['quote_ref']}), {e['reason']}")
+        if rec.excluded:
+            st.error(f"No supplier has a {rec.request.product} that meets every requirement.")
+            _excluded_list(rec)
+        else:
+            st.error(f"No quotations are available for \"{rec.request.product}\".")
         if available_products and not rec.excluded:
             st.info("Products with supplier quotations: " + ", ".join(available_products)
                     + ". Edit the product above and confirm again.")
@@ -327,8 +366,9 @@ def _show_recommendation(rec: Recommendation, available_products: list[str] | No
         _charts(rec)
     _section("Full comparison")
     _ranking_table(rec)
-    for e in rec.excluded:
-        st.caption(f"Excluded: {e['supplier']} ({e['quote_ref']}), {e['reason']}")
+    _excluded_list(rec)
+    if any(s.quote.simulated for s in rec.comparison.ranked):
+        st.caption(SIMULATED_NOTE)
     st.caption("Ranking: 60% price, 40% delivery, among suppliers that meet the required date. "
                "Scores are calculated by the app, not by the AI.")
 
@@ -532,8 +572,10 @@ def _new_request_tab(agent: ProcurementAgent, svc: ApprovalService, account: Acc
     if ext is not None:
         if ext.ok:
             _section("Confirm details")
-            d = {"product": ext.request.product, "quantity": ext.request.quantity,
-                 "date": ext.request.required_date}
+            r = ext.request
+            d = {"product": r.product, "quantity": r.quantity, "date": r.required_date,
+                 "reqs": [(x.spec, x.original or str(x.value)) for x in r.requirements],
+                 "budget": r.max_unit_price or 0.0}
         else:
             _section("Details needed")
             for name in ext.missing:
@@ -541,32 +583,70 @@ def _new_request_tab(agent: ProcurementAgent, svc: ApprovalService, account: Acc
             for err in ext.errors:
                 st.warning(err)
             st.caption("Fill in the fields below or rephrase your request.")
-            d = {"product": "", "quantity": 1, "date": today + timedelta(days=14)}
+            d = {"product": "", "quantity": 1, "date": today + timedelta(days=14), "reqs": [], "budget": 0.0}
+        for note in ext.notes:
+            st.caption(f"ℹ️ {note}")
 
+        category = agent.resolve_product(d["product"]) if d["product"] else None
+        schema = SCHEMA.get(category or "", {})
         with st.form("ui_confirm_form"):
             c1, c2, c3 = st.columns([2, 1, 1])
             product = c1.text_input("📦 Product", value=d["product"])
             quantity = c2.number_input("🔢 Quantity", min_value=0, value=int(d["quantity"]), step=1)
             required = c3.date_input("📅 Required by", value=d["date"])
-            confirmed = st.form_submit_button("Confirm and get quotes", type="primary",
-                                              icon=":material/search:")
+            edited = None
+            if schema:
+                st.markdown("**🛠️ Technical requirements** · edit, add or delete rows")
+                labels = {k: v["label"] for k, v in schema.items()}
+                frame = pd.DataFrame([{"Requirement": labels[k], "Value": v} for k, v in d["reqs"] if k in labels]
+                                     or None, columns=["Requirement", "Value"])
+                edited = st.data_editor(
+                    frame, num_rows="dynamic", hide_index=True, width="stretch", key="ui_reqs",
+                    column_config={
+                        "Requirement": st.column_config.SelectboxColumn(options=list(labels.values()), required=True),
+                        "Value": st.column_config.TextColumn(help="With unit, e.g. 150 psi, 10 bar, 4-20 mA, IP67"),
+                    })
+            budget = st.number_input("💵 Budget per unit (USD, 0 = no limit)", min_value=0.0,
+                                     value=float(d["budget"]), step=10.0)
+            confirmed = st.form_submit_button("Confirm and search suppliers", type="primary",
+                                              icon=":material/travel_explore:")
 
         if confirmed:
-            check = validate_fields(product, quantity, required, today, raw_text=text, requester=account.username)
+            cat = agent.resolve_product(product) if product else None
+            reqs, notes = [], []
+            if edited is not None and cat in SCHEMA:
+                by_label = {v["label"]: k for k, v in SCHEMA[cat].items()}
+                items = [{"spec": by_label.get(str(row["Requirement"])), "value": str(row["Value"]).strip()}
+                         for _, row in edited.iterrows()
+                         if str(row.get("Requirement") or "").strip() and str(row.get("Value") or "").strip()
+                         and str(row["Value"]).strip().lower() != "none"]
+                reqs, notes = parse_requirements(cat, items)
+            product_name = cat if cat in SCHEMA else product
+            check = validate_fields(product_name, quantity, required, today, raw_text=text,
+                                    requester=account.username, requirements=reqs,
+                                    max_unit_price=budget or None)
+            for note in notes:
+                st.warning(note)
             if not check.ok:
                 for err in check.errors + [f"Missing: {m}" for m in check.missing]:
                     st.error(err)
             else:
                 try:
-                    with st.spinner("Retrieving and comparing supplier quotations..."):
-                        ss["ui_rec"] = agent.recommend(check.request, today)
+                    ss["ui_rec"], ss["ui_activity"] = _run_search(agent, check.request, today)
                     ss.pop("ui_submitted_case", None)
                 except Exception as exc:
                     ss.pop("ui_rec", None)
                     st.error(f"Could not produce a recommendation: {exc}")
+            if ss.get("ui_rec") is not None:
+                st.rerun()  # redraw the page with the result and the collapsed activity log
 
     rec = ss.get("ui_rec")
     if rec is not None:
+        activity = ss.get("ui_activity")
+        if activity:
+            with st.expander(f"🤖 Agent activity · {activity['title']}", expanded=False):
+                for line in activity["lines"]:
+                    st.markdown(line)
         _section("Recommendation")
         _show_recommendation(rec, agent.available_products(), full=True)
         if rec.comparison.recommended is not None:
@@ -589,6 +669,65 @@ def _new_request_tab(agent: ProcurementAgent, svc: ApprovalService, account: Acc
     if ss.get("ui_submitted_case"):
         stage = len(STEPS) + 1
     steps_slot.markdown(_steps(stage), unsafe_allow_html=True)
+
+
+def _run_search(agent: ProcurementAgent, request, today: date):
+    """Run the agent with a live activity panel. Returns (recommendation, activity log)."""
+    import time
+
+    lines: list[str] = []
+    state = {"thinking": 0, "start": time.monotonic(), "qualifying": 0, "suppliers": 0, "compared": False}
+
+    with st.status("🤖 Agent working: planning the supplier search", expanded=True) as status:
+        def show(line: str, label: str | None = None) -> None:
+            lines.append(line)
+            st.markdown(line)
+            if label:
+                status.update(label=label, expanded=True)
+
+        def on_event(e: dict) -> None:
+            t = e.get("type")
+            if t == "thinking":
+                state["thinking"] += 1
+                if state["thinking"] == 1:
+                    show("🧠 **Amazon Bedrock** is planning which tools to call")
+                elif state["compared"]:
+                    show("✍️ **Amazon Bedrock** is writing the recommendation",
+                         "🤖 Agent working: writing the recommendation")
+            elif t == "search_start":
+                sites = ", ".join(x["site"] or x["supplier"] for x in e["suppliers"])
+                show(f"🔎 Searching **{len(e['suppliers'])} supplier catalogues** for **{e['product']}**: {sites}",
+                     f"🤖 Agent working: searching {len(e['suppliers'])} supplier catalogues")
+                for r in request.requirements:
+                    show(f"&nbsp;&nbsp;&nbsp;&nbsp;🛠️ must meet · {r.describe(request.product)}")
+                if request.max_unit_price:
+                    show(f"&nbsp;&nbsp;&nbsp;&nbsp;💵 budget · at most {request.max_unit_price:,.2f} USD per unit")
+            elif t == "supplier":
+                name = e["site"] or e["supplier"]
+                b = e["best"]
+                if b:
+                    stock = "in stock, " if b["from_stock"] else ""
+                    show(f"✅ **{name}** · {e['models']} model(s), {e['matching']} fit · best **{b['model']}** at "
+                         f"{b['unit_price']:,.2f} {b['currency']}/unit, {stock}ships in {b['lead_time_days']} days "
+                         f"· _{e['seconds']:.1f}s_")
+                else:
+                    why = f" · {e['reasons'][0]}" if e["reasons"] else ""
+                    show(f"❌ **{name}** · {e['models']} model(s), none fit{why} · _{e['seconds']:.1f}s_")
+            elif t == "search_done":
+                state["qualifying"], state["suppliers"] = e["qualifying"], e["suppliers"]
+            elif t == "tool" and e.get("name") == "compare_quotes":
+                state["compared"] = True
+                show(f"⚖️ Comparing **{state['qualifying']} qualifying supplier(s)** on price and delivery date",
+                     "🤖 Agent working: comparing suppliers")
+
+        rec = agent.recommend(request, today, progress=on_event)
+        took = time.monotonic() - state["start"]
+        n = len(rec.comparison.ranked)
+        title = (f"{n} of {state['suppliers'] or n} suppliers qualify · {took:.1f}s" if rec.comparison.recommended
+                 else f"no qualifying supplier · {took:.1f}s")
+        show(f"🏁 Done in {took:.1f}s · _{SIMULATED_NOTE}_")
+        status.update(label=f"✅ Agent finished: {title}", state="complete", expanded=False)
+    return rec, {"title": title, "lines": lines}
 
 
 def _my_requests_tab(svc: ApprovalService, account: Account) -> None:

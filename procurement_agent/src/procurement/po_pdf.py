@@ -78,12 +78,25 @@ def render_po_pdf(po, buyer: Buyer | None = None) -> bytes:
         pdf.cell(width, 8, head, border=1, align=align, fill=True)
     pdf.ln()
     pdf.set_font("Helvetica", "", 10)
-    for width, val, align in zip(widths, ["1", po.product.title(), str(po.quantity),
-                                          _money(po.unit_price, po.currency),
-                                          _money(po.total_price, po.currency)],
-                                 ["C", "L", "R", "R", "R"]):
-        pdf.cell(width, 8, _t(val), border=1, align=align)
-    pdf.ln()
+    model = getattr(po, "model", "")
+    spec = getattr(po, "specification", "")
+    desc = f"{po.product.title()}, model {model}" if model else po.product.title()
+    row_h = 8 if not spec else 13
+    y0 = pdf.get_y()
+    pdf.cell(widths[0], row_h, "1", border=1, align="C")
+    x_desc = pdf.get_x()
+    pdf.cell(widths[1], row_h, "", border=1)  # frame; text drawn inside below
+    for width, val in zip(widths[2:], [str(po.quantity), _money(po.unit_price, po.currency),
+                                       _money(po.total_price, po.currency)]):
+        pdf.cell(width, row_h, _t(val), border=1, align="R")
+    pdf.set_xy(x_desc + 1, y0 + 1.5)
+    pdf.cell(widths[1] - 2, 5, _t(desc))
+    if spec:
+        pdf.set_xy(x_desc + 1, y0 + 6.5)
+        pdf.set_font("Helvetica", "", 8)
+        pdf.cell(widths[1] - 2, 5, _t(spec[:80]))
+        pdf.set_font("Helvetica", "", 10)
+    pdf.set_xy(pdf.l_margin, y0 + row_h)
     pdf.set_font("Helvetica", "B", 10)
     pdf.cell(sum(widths[:4]), 8, "TOTAL", border=1, align="R")
     pdf.cell(widths[4], 8, _t(_money(po.total_price, po.currency)), border=1, align="R")

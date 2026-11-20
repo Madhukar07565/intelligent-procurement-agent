@@ -79,7 +79,7 @@ def logout(at):
 def submit_request(at, text="I need 50 laptops by Dec 15"):
     at.text_area(key="ui_request_text").set_value(text).run()
     btn(at, "Extract details").click().run()
-    btn(at, "Confirm and get quotes").click().run()
+    btn(at, "Confirm and search suppliers").click().run()
     btn(at, "Submit for approval").click().run()
     return at
 

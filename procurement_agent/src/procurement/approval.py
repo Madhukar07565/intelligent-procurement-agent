@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Callable
 
 from .models import Decision, Quote, Recommendation
 from .po import PurchaseOrder, PurchaseOrderIssuer
+from .specs import summarize_specs
 from .store import SqliteCaseStore
 
 if TYPE_CHECKING:
@@ -190,6 +191,8 @@ class ApprovalService:
                 "required_date": req.required_date.isoformat(), "requested_by": case.submitted_by,
                 "approved_by": d.approver, "approved_at": d.timestamp, "approval_comment": d.comment,
                 "recommended_supplier": case.recommendation.comparison.recommended.quote.supplier,
+                "model": q.model,
+                "specification": summarize_specs(q.product, q.spec_dict) if q.model else "",
             }
             try:
                 po = self._po_issuer.issue(fields)

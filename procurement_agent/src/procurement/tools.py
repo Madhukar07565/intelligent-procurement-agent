@@ -10,8 +10,9 @@ from datetime import date
 from typing import Any
 
 from .comparison import compare
-from .models import Comparison, Quote
-from .quotes import QuoteRepository
+from .models import Comparison, PurchaseRequest, Quote
+from .quotes import ProgressFn, QuoteRepository
+from .specs import SCHEMA, extraction_guide
 
 EXTRACT_REQUEST = "extract_request"
 GET_SUPPLIER_QUOTES = "get_supplier_quotes"
@@ -28,24 +29,42 @@ def _spec(name: str, description: str, properties: dict, required: list[str]) ->
     }
 
 
+_SPEC_KEYS = sorted({k for specs in SCHEMA.values() for k in specs})
+
 EXTRACT_SPEC = _spec(
     EXTRACT_REQUEST,
-    "Record the product, quantity and required delivery date found in the user's purchase request. "
-    "Omit a field if the user did not provide it and list its name in `missing`. Never guess.",
+    "Record the product, quantity, required delivery date and any technical requirements or budget found "
+    "in the user's purchase request. Omit a field if the user did not provide it and list its name in "
+    "`missing`. Never guess or invent requirements the user did not state.",
     {
-        "product": {"type": "string", "description": "Product name, singular, e.g. 'laptop'"},
+        "product": {"type": "string", "description": "Product name, singular, e.g. 'pressure sensor' or 'laptop'"},
         "quantity": {"type": "integer", "description": "Number of units"},
         "required_date": {"type": "string", "description": "Delivery date, YYYY-MM-DD"},
+        "requirements": {
+            "type": "array",
+            "description": "Technical requirements stated by the user, one item per spec",
+            "items": {"type": "object", "properties": {
+                "spec": {"type": "string", "enum": _SPEC_KEYS},
+                "value": {"type": "string", "description": "Value as stated, e.g. '150', '4-20 mA', 'IP67'"},
+                "unit": {"type": "string", "description": "Unit as stated, e.g. 'psi', 'bar', 'C', 'in', 'm'"},
+                "op": {"type": "string", "enum": [">=", "<=", "="],
+                       "description": "'>=' for 'at least'/'up to a range of', '<=' for 'or better' accuracy"},
+            }, "required": ["spec", "value"]},
+        },
+        "max_unit_price": {"type": "number", "description": "Budget per unit, only if the user states one"},
         "missing": {"type": "array", "items": {"type": "string"},
                     "description": "Names of fields that were not provided or are ambiguous"},
     },
     [],
 )
 
+EXTRACT_GUIDE = extraction_guide()
+
 QUOTES_SPEC = _spec(
     GET_SUPPLIER_QUOTES,
-    "Retrieve current supplier quotations for a product and quantity. Returns valid quotes with total "
-    "price and delivery date, plus quotes excluded (for example expired).",
+    "Search every supplier catalogue for a product and quantity, apply volume pricing, stock, minimum "
+    "order quantities, the budget and the confirmed technical requirements. Returns each supplier's best "
+    "qualifying model with total price, delivery date and spec checks, plus excluded models with reasons.",
     {
         "product": {"type": "string"},
         "quantity": {"type": "integer", "minimum": 1},
@@ -69,9 +88,12 @@ AGENT_TOOLS = [QUOTES_SPEC, COMPARE_SPEC]
 
 
 class ToolRegistry:
-    def __init__(self, repo: QuoteRepository, today: date):
+    def __init__(self, repo: QuoteRepository, today: date, request: PurchaseRequest | None = None,
+                 progress: ProgressFn | None = None):
         self._repo = repo
         self._today = today
+        self._request = request    # confirmed request: its requirements and budget always apply
+        self._progress = progress
         self.quotes: list[Quote] = []
         self.excluded: list[dict] = []
         self.comparison: Comparison | None = None
@@ -93,10 +115,16 @@ class ToolRegistry:
 
     def _get_quotes(self, args: dict) -> dict:
         quantity = int(args["quantity"])
-        quotes, excluded = self._repo.find(str(args["product"]), quantity, self._today)
+        reqs = self._request.requirements if self._request else ()
+        budget = self._request.max_unit_price if self._request else None
+        quotes, excluded = self._repo.find(str(args["product"]), quantity, self._today, reqs, budget,
+                                           progress=self._progress)
         self.quotes, self.excluded, self.comparison = quotes, excluded, None
         self.fetched = True
-        out = {"quotes": [q.to_dict() for q in quotes], "excluded": excluded}
+        out = {"quotes": [_quote_for_model(q) for q in quotes], "excluded": excluded}
+        if reqs:
+            out["requirements_checked"] = [r.describe(quotes[0].product if quotes else str(args["product"]))
+                                           for r in reqs]
         if not quotes and not excluded:
             out["available_products"] = self._repo.products()
         return out
@@ -112,3 +140,13 @@ class ToolRegistry:
         )
         self.comparison = comparison
         return comparison.to_dict()
+
+
+def _quote_for_model(q: Quote) -> dict:
+    """Compact quote for the model: enough to explain the choice, nothing it could act on."""
+    d = {"supplier": q.supplier, "model": q.model, "quote_ref": q.quote_ref, "unit_price": q.unit_price,
+         "total_price": q.total_price, "currency": q.currency, "delivery_date": q.delivery_date.isoformat(),
+         "lead_time_days": q.lead_time_days, "from_stock": q.from_stock}
+    if q.checks:
+        d["meets_all_requirements"] = all(ok for _, ok, _ in q.checks)
+    return {k: v for k, v in d.items() if v not in ("", None)}

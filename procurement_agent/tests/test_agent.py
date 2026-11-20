@@ -168,4 +168,4 @@ def test_confirmed_product_and_quantity_override_model(repo, today):
 def test_unknown_product_reports_available_products(repo, today):
     from procurement.tools import ToolRegistry
     out = ToolRegistry(repo, today).run("get_supplier_quotes", {"product": "printer", "quantity": 1})
-    assert out["available_products"] == ["laptop", "monitor", "office chair"]
+    assert "pressure sensor" in out["available_products"] and "laptop" in out["available_products"]
