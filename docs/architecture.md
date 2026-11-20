@@ -1,5 +1,7 @@
 # Intelligent Procurement Agent: Hackathon Architecture
 
+> This describes the current local build. The proposed AWS target architecture, following the AgentCore end-to-end blueprint, is in [architecture/agentcore-design.md](architecture/agentcore-design.md).
+
 Target: 4 hours, one developer. Python 3.11, Amazon Bedrock (Converse API), Streamlit, JSON quote file.
 
 ## 1. Design principles

@@ -1,0 +1,69 @@
+sequenceDiagram
+    autonumber
+    actor R as Requester
+    participant UI as Streamlit app
+    participant C as Amazon Cognito
+    participant RT as AgentCore Runtime<br/>(Procurement Agent)
+    participant M as AgentCore Memory
+    participant G as Bedrock Guardrails
+    participant LLM as Amazon Nova Lite
+    participant GW as AgentCore Gateway<br/>(Policy + interceptor)
+    participant T as Tool Lambdas
+    participant DB as DynamoDB
+    participant O as AgentCore Observability
+    actor A as Approver
+    participant API as Approval API<br/>(API Gateway + Lambda)
+    participant S3 as S3 purchase-orders
+
+    R->>UI: Sign in
+    UI->>C: Authenticate
+    C-->>UI: JWT (group = requester)
+    R->>UI: "I need 50 laptops by Dec 15"
+    UI->>RT: POST /invocations + JWT
+    RT->>O: Start trace
+    RT->>G: Check input (prompt attack, denied topics)
+    G-->>RT: Allowed
+    RT->>M: Load session history
+    RT->>LLM: Converse, forced extract_request tool
+    LLM-->>RT: product, quantity, required date
+    RT-->>UI: Extracted fields
+    R->>UI: Confirm or edit fields
+    UI->>RT: POST /invocations (confirmed request)
+    RT->>LLM: Converse with Gateway tool list
+    LLM-->>RT: call get_supplier_quotes
+    RT->>GW: MCP tools/call + OAuth token (AgentCore Identity)
+    GW->>GW: Policy check (Cedar, default deny) and rate limit
+    GW->>T: get_supplier_quotes(confirmed product, quantity)
+    T->>DB: Query SupplierQuotes
+    DB-->>T: Quote rows
+    T-->>GW: Valid quotes + excluded rows
+    GW-->>RT: Tool result
+    RT->>LLM: Tool result
+    LLM-->>RT: call compare_quotes
+    RT->>GW: MCP tools/call
+    GW->>T: compare_quotes(confirmed date, weights)
+    T-->>GW: Ranking, recommended supplier, warnings
+    GW-->>RT: Tool result
+    RT->>LLM: Tool result
+    LLM-->>RT: Explanation text
+    RT->>G: Check output (PII, grounding)
+    G-->>RT: Allowed
+    RT->>M: Save session events
+    RT->>O: End trace (latency, tokens, tool calls)
+    RT-->>UI: Recommendation (ranking from tools, text from model)
+    R->>UI: Submit for approval
+    UI->>API: POST /cases + requester JWT
+    API->>DB: Save case (PENDING_APPROVAL)
+
+    Note over RT,API: The agent has no tool or route to the Approval API.
+
+    A->>UI: Sign in (group = approver)
+    UI->>API: GET /cases?status=pending + approver JWT
+    API-->>UI: Pending cases
+    A->>UI: Approve
+    UI->>API: POST /cases/{id}/decision + approver JWT
+    API->>API: Check approver group claim, self-approval, quote expiry, one decision only
+    API->>DB: Save decision, audit event
+    API->>S3: Write PDF purchase order
+    API-->>UI: PO number + presigned download URL
+    UI-->>A: PO issued, Download PO (PDF)
