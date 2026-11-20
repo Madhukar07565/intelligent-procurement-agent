@@ -19,6 +19,8 @@ AWS credentials must be available (standard boto3 chain) with access to a Bedroc
 | `AUDIT_PATH` | `data/audit.jsonl` |
 | `BEDROCK_MIN_INTERVAL_SECONDS` | `1.2` (cannot be set below 1.05; hackathon rule is under 1 request/second) |
 | `PO_DIR` | `data/purchase_orders` |
+| `ALERT_POLL_SECONDS` | `15` (how often a signed-in approver checks for new requests; `0` turns it off) |
+| `APPROVAL_SNS_TOPIC_ARN`, `APP_URL` | unset (email alerts off). See `scripts/setup_email_alerts.md` |
 | `BUYER_NAME`, `BUYER_ADDRESS`, `BUYER_EMAIL` | RoyalCyber, 55 Shuman Blvd, Suite 275, Naperville, Illinois 60563, USA; email is a placeholder. Printed on the PO PDF |
 
 ## Run

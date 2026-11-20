@@ -16,6 +16,7 @@ import streamlit as st
 from .agent import ProcurementAgent, validate_fields
 from .approval import APPROVED, APPROVER, PENDING, PO_ISSUED, REJECTED, REQUESTER, ApprovalError, ApprovalService, Case
 from .auth import Account, AuthError, UserStore
+from .notifications import AlertStore
 from .models import Recommendation, ScoredQuote
 
 EXAMPLES = [
@@ -138,6 +139,16 @@ header[data-testid="stHeader"] {background: transparent;}
 .pa-empty {background: #fff; border: 1px dashed #cbd5e1; border-radius: 14px; padding: 28px; text-align: center;
   color: #64748b;}
 .pa-empty .i {font-size: 2rem;}
+.pa-alerts {background: linear-gradient(135deg, #fff7ed 0%, #ffffff 80%); border: 1px solid #fdba74;
+  border-left: 6px solid #f97316; border-radius: 14px; padding: 14px 18px; margin: 4px 0 14px;}
+.pa-alerts .h {font-weight: 800; color: #9a3412; font-size: 1.05rem; margin-bottom: 6px;}
+.pa-alert {display: flex; gap: 10px; align-items: baseline; padding: 6px 0; border-top: 1px dashed #fed7aa;
+  color: #431407; font-size: .92rem;}
+.pa-alert:first-of-type {border-top: none;}
+.pa-alert .id {font-weight: 800; white-space: nowrap;} .pa-alert .tm {color: #9a3412; font-size: .78rem;
+  white-space: nowrap; margin-left: auto;}
+.pa-bell {display: inline-block; background: #f97316; color: #fff; border-radius: 999px; padding: 4px 12px;
+  font-weight: 800; font-size: .85rem; margin-bottom: 10px;}
 </style>
 """
 
@@ -420,7 +431,7 @@ def _hero(account: Account) -> None:
     )
 
 
-def _sidebar(account: Account) -> None:
+def _sidebar(account: Account, unread: int = 0) -> None:
     _, _, c1, c2, _ = THEME[account.role]
     initials = "".join(p[0] for p in account.display_name.split()[:2]).upper() or "?"
     how = ("1. Describe what you need<br>2. Confirm the details<br>3. Review the AI recommendation<br>"
@@ -431,6 +442,8 @@ def _sidebar(account: Account) -> None:
         _html(f'<div class="pa-avatar" style="background: linear-gradient(135deg, {c1}, {c2});">{esc(initials)}</div>'
               f'<div class="pa-side-name">{esc(account.display_name)}</div>'
               f'<div class="pa-side-sub">@{esc(account.username)} · {esc(account.role.capitalize())}</div>')
+        if unread:
+            _html(f'<div class="pa-bell">🔔 {unread} new request{"s" if unread != 1 else ""}</div>')
         if st.button("Sign out", key="ui_signout", width="stretch", icon=":material/logout:"):
             _sign_out()
             st.rerun()
@@ -559,8 +572,8 @@ def _new_request_tab(agent: ProcurementAgent, svc: ApprovalService, account: Acc
         if rec.comparison.recommended is not None:
             case_id = ss.get("ui_submitted_case")
             if case_id:
-                st.info(f"Submitted for approval. Case ID: **{case_id}**. No purchase has been made. "
-                        "Track it under My requests.")
+                st.info(f"Submitted for approval. Case ID: **{case_id}**. Approvers have been alerted. "
+                        "No purchase has been made. Track it under My requests.")
             elif st.button("Submit for approval", key="ui_submit_btn", type="primary", icon=":material/send:"):
                 try:
                     ss["ui_submitted_case"] = svc.submit(rec, account.username)
@@ -607,7 +620,7 @@ def _requester_home(agent, svc, account, today) -> None:
 
 
 # ---------------------------------------------------------------- approver
-def _approval_queue_tab(svc: ApprovalService, account: Account) -> None:
+def _approval_queue_tab(svc: ApprovalService, account: Account, alerts: AlertStore | None = None) -> None:
     pending = svc.list_cases(statuses=[PENDING])
     if not pending:
         st.success("No requests are waiting for approval.")
@@ -632,16 +645,18 @@ def _approval_queue_tab(svc: ApprovalService, account: Account) -> None:
                 b1, b2 = st.columns(2)
                 if b1.button("Approve", key=f"ui_approve_{case.case_id}", type="primary", width="stretch",
                              icon=":material/check_circle:"):
-                    _decide(svc, case.case_id, user, True, comment, chosen)
+                    _decide(svc, case.case_id, user, True, comment, chosen, alerts)
                 if b2.button("Reject", key=f"ui_reject_{case.case_id}", width="stretch",
                              icon=":material/cancel:"):
-                    _decide(svc, case.case_id, user, False, comment, chosen)
+                    _decide(svc, case.case_id, user, False, comment, chosen, alerts)
                 st.caption("Approving issues a numbered PDF purchase order for the selected supplier.")
 
 
-def _decide(svc, case_id, user, approve, comment, chosen) -> None:
+def _decide(svc, case_id, user, approve, comment, chosen, alerts: AlertStore | None = None) -> None:
     try:
         svc.decide(case_id, user, approve, comment, chosen)
+        if alerts is not None:
+            alerts.mark_read(user.name, case_id)
         st.rerun()
     except ApprovalError as exc:
         st.error(str(exc))
@@ -666,7 +681,56 @@ def _history_tab(svc: ApprovalService, account: Account) -> None:
             _show_recommendation(case.recommendation, full=False)
 
 
-def _approver_home(svc: ApprovalService, account: Account) -> None:
+def _active_alerts(svc: ApprovalService, alerts: AlertStore, account: Account) -> list:
+    """Unread alerts for cases still waiting. Alerts for cases already decided are marked read."""
+    pending_ids = {c.case_id for c in svc.list_cases(statuses=[PENDING])}
+    active = []
+    for a in alerts.unread(account.username):
+        if a.case_id in pending_ids:
+            active.append(a)
+        else:
+            alerts.mark_read(account.username, a.case_id)
+    return active
+
+
+def _alert_panel(alerts: AlertStore, active: list, account: Account) -> None:
+    if not active:
+        return
+    n = len(active)
+    rows = "".join(
+        f'<div class="pa-alert"><span class="id">🔔 {esc(a.case_id)}</span><span>{esc(a.message)}</span>'
+        f'<span class="tm">{esc(_ts(a.created_at))}</span></div>' for a in active)
+    _html(f'<div class="pa-alerts"><div class="h">{n} new request{"s" if n != 1 else ""} waiting for your '
+          f'approval</div>{rows}</div>')
+    if st.button("Mark all as read", key="ui_alerts_read", icon=":material/done_all:"):
+        alerts.mark_read(account.username)
+        st.rerun()
+
+
+def _alert_watch(alerts: AlertStore, account: Account) -> None:
+    """Runs on a timer while an approver is signed in; refreshes the page when a new alert arrives."""
+    ss = st.session_state
+    count = alerts.unread_count(account.username)
+    if count > ss.get("ui_seen_alerts", 0):
+        ss["ui_seen_alerts"] = count
+        ss["ui_toast_pending"] = True
+        st.rerun(scope="app")
+    ss["ui_seen_alerts"] = count
+
+
+def _approver_home(svc: ApprovalService, account: Account, alerts: AlertStore | None = None,
+                   poll_seconds: int | None = None) -> None:
+    ss = st.session_state
+    if alerts is not None:
+        active = _active_alerts(svc, alerts, account)
+        first_view = "ui_seen_alerts" not in ss
+        if active and (first_view or ss.pop("ui_toast_pending", False)):
+            st.toast(f"{len(active)} new purchase request{'s' if len(active) != 1 else ''} waiting for your "
+                     "approval", icon="🔔")
+        ss["ui_seen_alerts"] = alerts.unread_count(account.username)
+        _alert_panel(alerts, active, account)
+        if poll_seconds:
+            st.fragment(run_every=poll_seconds)(_alert_watch)(alerts, account)
     all_cases = svc.list_cases()
     pending = [c for c in all_cases if c.status == PENDING]
     approved = [c for c in all_cases if c.status in (APPROVED, PO_ISSUED)]
@@ -680,13 +744,15 @@ def _approver_home(svc: ApprovalService, account: Account) -> None:
     st.write("")
     tab_queue, tab_hist = st.tabs([f"Approval queue ({len(pending)})", "Decision history"])
     with tab_queue:
-        _approval_queue_tab(svc, account)
+        _approval_queue_tab(svc, account, alerts)
     with tab_hist:
         _history_tab(svc, account)
 
 
 # ---------------------------------------------------------------- entry point
-def render(agent: ProcurementAgent, svc: ApprovalService, users: UserStore, today: date | None = None) -> None:
+def render(agent: ProcurementAgent, svc: ApprovalService, users: UserStore, today: date | None = None,
+           alerts: AlertStore | None = None, poll_seconds: int | None = 15) -> None:
+    """poll_seconds: how often a signed-in approver checks for new alerts (None disables)."""
     st.set_page_config(page_title="Procurement Agent", page_icon="🛒", layout="wide")
     _html(CSS)
     today = today or date.today()
@@ -697,9 +763,12 @@ def render(agent: ProcurementAgent, svc: ApprovalService, users: UserStore, toda
     if account.role not in THEME:
         st.error("Your account has no valid role. Contact an administrator.")
         return
-    _sidebar(account)
+    unread = 0
+    if alerts is not None and account.role == APPROVER:
+        unread = len(_active_alerts(svc, alerts, account))
+    _sidebar(account, unread)
     _hero(account)
     if account.role == REQUESTER:
         _requester_home(agent, svc, account, today)
     else:
-        _approver_home(svc, account)
+        _approver_home(svc, account, alerts, poll_seconds)

@@ -11,11 +11,14 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 from .models import Decision, Quote, Recommendation
 from .po import PurchaseOrder, PurchaseOrderIssuer
 from .store import SqliteCaseStore
+
+if TYPE_CHECKING:
+    from .notifications import Notifier
 
 PENDING = "PENDING_APPROVAL"
 APPROVED = "APPROVED"
@@ -59,8 +62,10 @@ def _utcnow() -> datetime:
 
 class ApprovalService:
     def __init__(self, audit_path: str | Path, clock: Callable[[], datetime] = _utcnow,
-                 po_issuer: PurchaseOrderIssuer | None = None, store: SqliteCaseStore | None = None):
+                 po_issuer: PurchaseOrderIssuer | None = None, store: SqliteCaseStore | None = None,
+                 notifier: "Notifier | None" = None):
         self._po_issuer = po_issuer
+        self._notifier = notifier
         self._store = store or SqliteCaseStore(":memory:")
         self._audit_path = Path(audit_path)
         self._audit_path.parent.mkdir(parents=True, exist_ok=True)
@@ -87,7 +92,19 @@ class ApprovalService:
             "excluded": recommendation.excluded,
             "explanation": recommendation.explanation,
         })
+        self._notify_approvers(case_id, submitted_by)
         return case_id
+
+    def _notify_approvers(self, case_id: str, submitted_by: str) -> None:
+        """Alert approvers. The case is already saved, so a failure here never loses it."""
+        if self._notifier is None:
+            return
+        try:
+            sent = self._notifier.case_submitted(self.get(case_id))
+            errors = getattr(self._notifier, "last_errors", {})
+            self._audit("approvers_notified", case_id, submitted_by, {"alerts_sent": sent, "errors": errors})
+        except Exception as exc:
+            self._audit("notify_failed", case_id, submitted_by, {"error": f"{type(exc).__name__}: {exc}"})
 
     def po_pdf(self, case_id: str) -> bytes:
         """PDF of the issued purchase order for a case."""

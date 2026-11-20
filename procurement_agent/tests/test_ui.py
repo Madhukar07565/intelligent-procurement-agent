@@ -31,8 +31,11 @@ def app_script():
             TMP + "/audit.jsonl", po_issuer=FilePurchaseOrderIssuer(TMP + "/pos"),
             store=SqliteCaseStore(TMP + "/cases.db"))
         st.session_state["users"] = UserStore(TMP + "/users.json")
+        from procurement.notifications import AlertStore, InAppNotifier
+        st.session_state["alerts"] = AlertStore(TMP + "/cases.db")
+        st.session_state["svc"]._notifier = InAppNotifier(st.session_state["alerts"], st.session_state["users"])
     render(st.session_state["agent"], st.session_state["svc"], st.session_state["users"],
-           today=date(2026, 11, 20))
+           today=date(2026, 11, 20), alerts=st.session_state["alerts"], poll_seconds=None)
 
 
 @pytest.fixture
@@ -218,3 +221,48 @@ def test_UI12_untrusted_text_is_escaped_in_html_cards(make_app):
     page = " ".join(m.value for m in at.markdown)
     assert "<img src=x" not in page and "<script>alert" not in page
     assert "&lt;img src=x onerror=alert(1)&gt;" in page and "&lt;script&gt;" in page
+
+
+def alert_text(at):
+    return " ".join(m.value for m in at.markdown if m.value.startswith("<div class=\"pa-alerts\""))
+
+
+def test_UI13_approver_is_alerted_after_requester_submits(make_app):
+    at = submit_request(login(make_app(), "alice"))
+    assert any("Approvers have been alerted" in i.value for i in at.info)
+    case_id = at.session_state["ui_submitted_case"]
+    logout(at)
+    login(at, "bob")
+    assert any("new purchase request" in t.value for t in at.toast)
+    panel = alert_text(at)
+    assert "1 new request waiting for your approval" in panel and case_id in panel
+    assert "alice requested 50 x laptop" in panel
+    assert any("🔔 1 new request" in m.value for m in at.sidebar.markdown)
+
+
+def test_UI14_mark_all_read_clears_alerts(make_app):
+    at = submit_request(login(make_app(), "alice"))
+    logout(at)
+    login(at, "bob")
+    btn(at, "Mark all as read").click().run()
+    assert alert_text(at) == "" and not any("🔔" in m.value for m in at.sidebar.markdown)
+    assert tab_labels(at)[0] == "Approval queue (1)"       # the case itself is still waiting
+    logout(at)
+    login(at, "bob")
+    assert len(at.toast) == 0
+
+
+def test_UI15_deciding_a_case_clears_its_alert(make_app):
+    at = submit_request(login(make_app(), "alice"))
+    logout(at)
+    login(at, "bob")
+    btn(at, "Approve").click().run()
+    assert alert_text(at) == ""
+    assert at.session_state["alerts"].unread_count("bob") == 0
+
+
+def test_UI16_requester_sees_no_approver_alerts(make_app):
+    at = submit_request(login(make_app(), "alice"))
+    logout(at)
+    login(at, "carol")
+    assert alert_text(at) == "" and len(at.toast) == 0
