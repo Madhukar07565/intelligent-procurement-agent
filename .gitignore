@@ -16,6 +16,11 @@ procurement_agent/data/users.json
 procurement_agent/data/*.tmp
 procurement_agent/data/backups/
 
+# CDK
+infra/.venv/
+infra/cdk.out/
+infra/.deploy/
+
 # Editors / OS
 .DS_Store
 .vscode/

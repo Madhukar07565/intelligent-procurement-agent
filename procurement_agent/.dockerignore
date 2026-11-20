@@ -1,0 +1,8 @@
+.venv
+**/__pycache__
+.pytest_cache
+tests
+scripts
+data/*
+!data/quotes.json
+*.md
