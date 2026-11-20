@@ -78,25 +78,28 @@ def render_po_pdf(po, buyer: Buyer | None = None) -> bytes:
         pdf.cell(width, 8, head, border=1, align=align, fill=True)
     pdf.ln()
     pdf.set_font("Helvetica", "", 10)
-    model = getattr(po, "model", "")
-    spec = getattr(po, "specification", "")
-    desc = f"{po.product.title()}, model {model}" if model else po.product.title()
-    row_h = 8 if not spec else 13
-    y0 = pdf.get_y()
-    pdf.cell(widths[0], row_h, "1", border=1, align="C")
-    x_desc = pdf.get_x()
-    pdf.cell(widths[1], row_h, "", border=1)  # frame; text drawn inside below
-    for width, val in zip(widths[2:], [str(po.quantity), _money(po.unit_price, po.currency),
-                                       _money(po.total_price, po.currency)]):
-        pdf.cell(width, row_h, _t(val), border=1, align="R")
-    pdf.set_xy(x_desc + 1, y0 + 1.5)
-    pdf.cell(widths[1] - 2, 5, _t(desc))
-    if spec:
-        pdf.set_xy(x_desc + 1, y0 + 6.5)
-        pdf.set_font("Helvetica", "", 8)
-        pdf.cell(widths[1] - 2, 5, _t(spec[:80]))
-        pdf.set_font("Helvetica", "", 10)
-    pdf.set_xy(pdf.l_margin, y0 + row_h)
+    items = po.items()
+    for n, item in enumerate(items, start=1):
+        model, spec = item.get("model", ""), item.get("specification", "")
+        desc = f"{str(item['product']).title()}, model {model}" if model else str(item["product"]).title()
+        row_h = 8 if not spec else 13
+        if pdf.get_y() + row_h > pdf.h - pdf.b_margin - 10:
+            pdf.add_page()
+        y0 = pdf.get_y()
+        pdf.cell(widths[0], row_h, str(n), border=1, align="C")
+        x_desc = pdf.get_x()
+        pdf.cell(widths[1], row_h, "", border=1)  # frame; text drawn inside below
+        for width, val in zip(widths[2:], [str(item["quantity"]), _money(item["unit_price"], po.currency),
+                                           _money(item["amount"], po.currency)]):
+            pdf.cell(width, row_h, _t(val), border=1, align="R")
+        pdf.set_xy(x_desc + 1, y0 + 1.5)
+        pdf.cell(widths[1] - 2, 5, _t(desc[:60]))
+        if spec:
+            pdf.set_xy(x_desc + 1, y0 + 6.5)
+            pdf.set_font("Helvetica", "", 8)
+            pdf.cell(widths[1] - 2, 5, _t(spec[:80]))
+            pdf.set_font("Helvetica", "", 10)
+        pdf.set_xy(pdf.l_margin, y0 + row_h)
     pdf.set_font("Helvetica", "B", 10)
     pdf.cell(sum(widths[:4]), 8, "TOTAL", border=1, align="R")
     pdf.cell(widths[4], 8, _t(_money(po.total_price, po.currency)), border=1, align="R")
@@ -106,10 +109,11 @@ def render_po_pdf(po, buyer: Buyer | None = None) -> bytes:
     pdf.set_font("Helvetica", "B", 10)
     pdf.cell(w, 6, "DELIVERY AND TERMS", new_x="LMARGIN", new_y="NEXT")
     pdf.set_font("Helvetica", "", 10)
+    multi = len(items) > 1
     for line in (
         f"Required delivery date: {po.required_date}",
-        f"Expected delivery date (per quotation): {po.delivery_date}",
-        f"Prices, payment and delivery terms as stated in quotation {po.quote_ref}.",
+        f"Expected delivery date (per quotation): {po.delivery_date}" + (" (latest item)" if multi else ""),
+        f"Prices, payment and delivery terms as stated in quotation{'s' if multi else ''} {po.quote_ref}.",
         f"Please quote PO number {po.po_number} on all invoices, delivery notes and correspondence.",
         f"Please confirm acceptance of this order to {buyer.email}.",
     ):
@@ -125,10 +129,14 @@ def render_po_pdf(po, buyer: Buyer | None = None) -> bytes:
         f"Approved by: {po.approved_by} on {po.approved_at[:19].replace('T', ' ')} UTC",
         f"Internal reference: case {po.case_id}",
     ]
-    if po.supplier != po.recommended_supplier:
-        lines.append(f"Approver selected {po.supplier} over the recommended {po.recommended_supplier}. "
+    if getattr(po, "build_title", ""):
+        lines.insert(0, f"Project: {po.build_title}")
+    overrides = [x for x in items if x.get("recommended_supplier") and x["recommended_supplier"] != po.supplier]
+    for x in overrides:
+        what = f" for {x['product']}" if multi else ""
+        lines.append(f"Approver selected {po.supplier} over the recommended {x['recommended_supplier']}{what}. "
                      f"Reason: {po.approval_comment}")
-    elif po.approval_comment:
+    if not overrides and po.approval_comment:
         lines.append(f"Approval comment: {po.approval_comment}")
     for line in lines:
         pdf.multi_cell(w, 5, _t(line), new_x="LMARGIN", new_y="NEXT")

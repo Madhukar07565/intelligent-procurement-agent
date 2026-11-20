@@ -17,10 +17,14 @@ from .agent import ProcurementAgent, validate_fields
 from .approval import APPROVED, APPROVER, PENDING, PO_ISSUED, REJECTED, REQUESTER, ApprovalError, ApprovalService, Case
 from .auth import Account, AuthError, UserStore
 from .notifications import AlertStore
-from .models import Recommendation, ScoredQuote
+from .models import BuildRecommendation, Recommendation, ScoredQuote, group_by_supplier
 from .specs import SCHEMA, parse_requirements, summarize_specs
 
 EXAMPLES = [
+    ("🚀  Rocket test stand · 3 parts",
+     "To build our rocket engine test stand we need 100 pressure sensors 0-150 psi with 4-20 mA output and "
+     "1/4 inch NPT, 6 magnetic flow meters for 2 inch pipe with 4-20 mA output, and 200 inductive proximity "
+     "sensors M18 PNP with 8 mm sensing distance, IP67, all by January 30"),
     ("🔧  100 pressure sensors", "Our company needs to purchase 100 pressure sensors to manufacture its products: "
                                  "0-150 psi, 4-20 mA output, 1/4 inch NPT, needed by January 15"),
     ("🌡️  40 Pt100 RTD probes", "We need 40 Pt100 RTD temperature probes rated to at least 200 C, 1/4 NPT, "
@@ -153,6 +157,17 @@ header[data-testid="stHeader"] {background: transparent;}
   padding: 3px 10px; font-size: .8rem; font-weight: 700;}
 .pa-check.no {background: #fef2f2; border-color: #fecaca; color: #991b1b;}
 .pa-sim {font-size: .75rem; color: #64748b;}
+.pa-plan {background: linear-gradient(135deg, #eef2ff 0%, #ffffff 75%); border: 1px solid #c7d2fe;
+  border-radius: 16px; padding: 16px 20px; margin: 6px 0 14px;}
+.pa-plan .h {display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap;}
+.pa-plan .t {font-size: 1.15rem; font-weight: 800; color: #1e1b4b;}
+.pa-plan .tot {font-size: 1.15rem; font-weight: 800; color: #4f46e5;}
+.pa-pos {display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 12px; margin-top: 12px;}
+.pa-po {background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 12px 14px;}
+.pa-po .s {font-weight: 800; color: #0f172a; display: flex; justify-content: space-between; gap: 8px;}
+.pa-po .i {font-size: .86rem; color: #475569; margin-top: 4px;}
+.pa-po .i b {color: #0f172a;}
+.pa-po .a {font-weight: 800; color: #0f172a; margin-top: 8px; text-align: right;}
 .pa-alerts {background: linear-gradient(135deg, #fff7ed 0%, #ffffff 80%); border: 1px solid #fdba74;
   border-left: 6px solid #f97316; border-radius: 14px; padding: 14px 18px; margin: 4px 0 14px;}
 .pa-alerts .h {font-weight: 800; color: #9a3412; font-size: 1.05rem; margin-bottom: 6px;}
@@ -374,15 +389,73 @@ def _show_recommendation(rec: Recommendation, available_products: list[str] | No
 
 
 # ---------------------------------------------------------------- case views
+def _po_plan(lines: list[Recommendation], quotes: list, title: str = "", heading: str = "") -> None:
+    """Card listing the purchase orders: one per supplier, with its line items and subtotal."""
+    groups = group_by_supplier(quotes)
+    if not groups:
+        return
+    currency = next(q for q in quotes if q is not None).currency
+    total = sum(q.total_price for q in quotes if q is not None)
+    cards = []
+    for n, (supplier, idx) in enumerate(groups, start=1):
+        rows = "".join(
+            f'<div class="i"><b>{esc(lines[i].request.quantity)} x {esc(lines[i].request.product)}</b>'
+            f'{" · " + esc(quotes[i].model) if quotes[i].model else ""} · '
+            f'{esc(_money(quotes[i].total_price, currency))}</div>' for i in idx)
+        sub = sum(quotes[i].total_price for i in idx)
+        site = quotes[idx[0]].supplier_site
+        cards.append(f'<div class="pa-po"><div class="s"><span>PO {n} · {esc(supplier)}</span>'
+                     f'<span class="pa-pill pa-blue">{len(idx)} item{"s" if len(idx) != 1 else ""}</span></div>'
+                     f'{f"<div class=i>{esc(site)}</div>" if site else ""}{rows}'
+                     f'<div class="a">{esc(_money(sub, currency))}</div></div>')
+    k = len(groups)
+    head = heading or f"{k} purchase order{'s' if k != 1 else ''} · one per supplier"
+    name = f"{esc(title)} · " if title else ""
+    _html(f'<div class="pa-plan"><div class="h"><span class="t">🧾 {name}{esc(head)}</span>'
+          f'<span class="tot">Total {esc(_money(total, currency))}</span></div>'
+          f'<div class="pa-pos">{"".join(cards)}</div></div>')
+
+
+def _show_build(build: BuildRecommendation, available_products: list[str] | None = None, full: bool = True,
+                quotes: list | None = None) -> None:
+    """A single-product result as before; a multi-product result as summary, PO plan and one tab per product."""
+    if len(build.lines) == 1:
+        _show_recommendation(build.lines[0], available_products, full=full)
+        return
+    if build.summary:
+        text = esc(build.summary).replace("\n", "<br>")
+        _html(f'<div class="pa-ai"><div class="lbl">✨ AI summary · Amazon Bedrock</div>{text}</div>')
+    if quotes is None:
+        quotes = [r.comparison.recommended.quote if r.comparison.recommended else None for r in build.lines]
+    _po_plan(list(build.lines), quotes, build.title)
+    for r in build.unfilled:
+        st.warning(f"No supplier can fulfil **{r.request.quantity} x {r.request.product}** with the stated "
+                   "requirements. It is not included in the purchase orders.")
+    labels = []
+    for n, r in enumerate(build.lines, start=1):
+        best = r.comparison.recommended
+        labels.append(f"{n} · {r.request.product} → {best.quote.supplier}" if best else f"{n} · {r.request.product} ✗")
+    for tab, r in zip(st.tabs(labels), build.lines):
+        with tab:
+            _show_recommendation(r, available_products, full=full)
+
+
+def _case_build(case: Case) -> BuildRecommendation:
+    return BuildRecommendation(case.title, tuple(case.lines), case.summary)
+
+
 def _case_title(case: Case) -> str:
     req = case.recommendation.request
+    if case.is_build:
+        name = case.title or "Multi-product request"
+        return (f"{case.case_id} · {name}: {len(case.lines)} products by {req.required_date.isoformat()} · "
+                f"{STATUS_BADGE[case.status]}")
     return (f"{case.case_id} · {req.quantity} x {req.product} by {req.required_date.isoformat()} · "
             f"{STATUS_BADGE[case.status]}")
 
 
 def _case_value(case: Case) -> float:
-    q = case.chosen_quote or case.recommendation.comparison.recommended.quote
-    return q.total_price
+    return case.total()
 
 
 def _days_waiting(case: Case) -> int:
@@ -399,8 +472,12 @@ def _case_facts(case: Case, show_requester: bool = True) -> None:
     facts = []
     if show_requester:
         facts.append(("👤 Requested by", case.submitted_by))
+    if case.is_build:
+        groups = case.po_groups()
+        facts.append(("📦 Items", f"{len(case.lines)} products · {len(groups)} purchase order(s)"))
+    else:
+        facts.append(("📦 Item", f"{req.quantity} x {req.product}"))
     facts += [
-        ("📦 Item", f"{req.quantity} x {req.product}"),
         ("📅 Needed by", req.required_date.isoformat()),
         ("💰 Value", _money(_case_value(case), q.currency)),
         ("🕒 Submitted", _ts(case.submitted_at)),
@@ -422,8 +499,10 @@ def _timeline(case: Case) -> None:
         steps.append(("", "3", "Purchase order", "not issued"))
     else:
         steps.append(("done", "✓", "Approved", f"by {d.approver}"))
-        if case.purchase_order is not None:
-            steps.append(("done", "✓", "PO issued", case.purchase_order.po_number))
+        if case.status == PO_ISSUED:
+            numbers = [p.po_number for p in case.purchase_orders]
+            label = "PO issued" if len(numbers) == 1 else f"{len(numbers)} POs issued"
+            steps.append(("done", "✓", label, numbers[0] if len(numbers) == 1 else f"{numbers[0]} … {numbers[-1]}"))
         else:
             steps.append(("fail" if case.po_error else "wait", "3", "Purchase order",
                           "generation failed" if case.po_error else "pending"))
@@ -437,27 +516,36 @@ def _timeline(case: Case) -> None:
 
 
 def _show_outcome(svc: ApprovalService, case: Case) -> None:
-    """Timeline, decision, confirmation and PO download. Read-only, used by both roles."""
+    """Timeline, decision, confirmation and PO downloads. Read-only, used by both roles."""
     _timeline(case)
-    st.markdown(f"**Status:** {STATUS_LABEL[case.status]}")
+    label = STATUS_LABEL[case.status]
+    if case.status == PO_ISSUED and len(case.purchase_orders) > 1:
+        label = f"Approved. {len(case.purchase_orders)} purchase orders issued, one per supplier."
+    st.markdown(f"**Status:** {label}")
     if not case.decision:
         return
     d = case.decision
     st.caption(f"Decision by {d.approver} at {_ts(d.timestamp)}. Comment: {d.comment or '-'}")
     if case.purchase_confirmed:
-        q = case.chosen_quote
-        st.success(f"Purchase confirmed with {q.supplier}: {q.total_price:,.2f} {q.currency}, "
-                   f"delivery {q.delivery_date.isoformat()}.")
-    po = case.purchase_order
-    if po is not None:
-        st.success(f"Purchase order **{po.po_number}** issued at {_ts(po.issued_at)}.")
+        for supplier, idx in group_by_supplier(case.chosen_quotes):
+            quotes = [case.chosen_quotes[i] for i in idx]
+            total = sum(q.total_price for q in quotes)
+            latest = max(q.delivery_date for q in quotes).isoformat()
+            what = (f" ({', '.join(case.lines[i].request.product for i in idx)})" if case.is_build else "")
+            st.success(f"Purchase confirmed with {supplier}{what}: {total:,.2f} {quotes[0].currency}, "
+                       f"delivery {latest}.")
+    for n, po in enumerate(case.purchase_orders):
+        c1, c2 = st.columns([3, 1])
+        items = len(po.items())
+        detail = f" to {po.supplier}, {items} item(s), {po.total_price:,.2f} {po.currency}" if case.is_build else ""
+        c1.success(f"Purchase order **{po.po_number}**{detail} issued at {_ts(po.issued_at)}.")
         try:
-            st.download_button("Download PO (PDF)", svc.po_pdf(case.case_id), file_name=f"{po.po_number}.pdf",
-                               mime="application/pdf", key=f"ui_dl_{case.case_id}", type="primary",
-                               icon=":material/picture_as_pdf:")
+            c2.download_button("Download PO (PDF)", svc.po_pdf(case.case_id, po.po_number),
+                               file_name=f"{po.po_number}.pdf", mime="application/pdf",
+                               key=f"ui_dl_{case.case_id}_{n}", type="primary", icon=":material/picture_as_pdf:")
         except (ApprovalError, OSError) as exc:
-            st.error(f"PO PDF is not available: {exc}")
-    elif case.status == APPROVED and case.po_error:
+            c2.error(f"PO PDF is not available: {exc}")
+    if case.status == APPROVED and case.po_error:
         st.error(f"Purchase order could not be generated: {case.po_error}")
 
 
@@ -538,6 +626,32 @@ def _use_example(text: str) -> None:
     st.session_state["ui_request_text"] = text
 
 
+def _requirement_editor(category: str | None, draft_reqs: list, key: str):
+    schema = SCHEMA.get(category or "", {})
+    if not schema:
+        return None
+    labels = {k: v["label"] for k, v in schema.items()}
+    frame = pd.DataFrame([{"Requirement": labels[k], "Value": v} for k, v in draft_reqs if k in labels] or None,
+                         columns=["Requirement", "Value"])
+    return st.data_editor(
+        frame, num_rows="dynamic", hide_index=True, width="stretch", key=key,
+        column_config={
+            "Requirement": st.column_config.SelectboxColumn(options=list(labels.values()), required=True),
+            "Value": st.column_config.TextColumn(help="With unit, e.g. 150 psi, 10 bar, 4-20 mA, IP67"),
+        })
+
+
+def _editor_items(edited, category: str | None) -> list[dict]:
+    """Requirement rows from the editor as spec items for agent.validate_lines."""
+    if edited is None or category not in SCHEMA:
+        return []
+    by_label = {v["label"]: k for k, v in SCHEMA[category].items()}
+    return [{"spec": by_label.get(str(row["Requirement"])), "value": str(row["Value"]).strip()}
+            for _, row in edited.iterrows()
+            if str(row.get("Requirement") or "").strip() and str(row.get("Value") or "").strip()
+            and str(row["Value"]).strip().lower() != "none"]
+
+
 def _steps(stage: int) -> str:
     parts = []
     for i, label in enumerate(STEPS, start=1):
@@ -552,7 +666,7 @@ def _new_request_tab(agent: ProcurementAgent, svc: ApprovalService, account: Acc
     steps_slot = st.empty()
 
     _section("What do you need?")
-    st.caption("Try an example:")
+    st.caption("Try an example, or describe several products at once (for example everything needed to build one assembly):")
     cols = st.columns(len(EXAMPLES))
     for i, (col, (label, text)) in enumerate(zip(cols, EXAMPLES)):
         col.button(label, key=f"ui_ex_{i}", on_click=_use_example, args=(text,), width="stretch")
@@ -564,18 +678,17 @@ def _new_request_tab(agent: ProcurementAgent, svc: ApprovalService, account: Acc
         try:
             with st.spinner("Amazon Bedrock is reading your request..."):
                 ss["ui_extraction"] = agent.extract_request(text, today, requester=account.username)
+            ss["ui_ext_n"] = ss.get("ui_ext_n", 0) + 1  # fresh form widgets for each extraction
         except Exception as exc:  # network, credentials, throttling
             ss.pop("ui_extraction", None)
             st.error(f"The AI service failed: {exc}")
 
     ext = ss.get("ui_extraction")
     if ext is not None:
+        drafts = ext.drafts or [{"product": "", "quantity": 1, "requirements": [], "max_unit_price": None}]
+        multi = len(drafts) > 1
         if ext.ok:
-            _section("Confirm details")
-            r = ext.request
-            d = {"product": r.product, "quantity": r.quantity, "date": r.required_date,
-                 "reqs": [(x.spec, x.original or str(x.value)) for x in r.requirements],
-                 "budget": r.max_unit_price or 0.0}
+            _section(f"Confirm details · {len(drafts)} products" if multi else "Confirm details")
         else:
             _section("Details needed")
             for name in ext.missing:
@@ -583,80 +696,107 @@ def _new_request_tab(agent: ProcurementAgent, svc: ApprovalService, account: Acc
             for err in ext.errors:
                 st.warning(err)
             st.caption("Fill in the fields below or rephrase your request.")
-            d = {"product": "", "quantity": 1, "date": today + timedelta(days=14), "reqs": [], "budget": 0.0}
         for note in ext.notes:
             st.caption(f"ℹ️ {note}")
+        if multi:
+            st.caption("Each product is searched separately. Products won by the same supplier share one purchase order.")
 
-        category = agent.resolve_product(d["product"]) if d["product"] else None
-        schema = SCHEMA.get(category or "", {})
+        n_ext = ss.get("ui_ext_n", 0)
+        widgets = []
         with st.form("ui_confirm_form"):
-            c1, c2, c3 = st.columns([2, 1, 1])
-            product = c1.text_input("📦 Product", value=d["product"])
-            quantity = c2.number_input("🔢 Quantity", min_value=0, value=int(d["quantity"]), step=1)
-            required = c3.date_input("📅 Required by", value=d["date"])
-            edited = None
-            if schema:
-                st.markdown("**🛠️ Technical requirements** · edit, add or delete rows")
-                labels = {k: v["label"] for k, v in schema.items()}
-                frame = pd.DataFrame([{"Requirement": labels[k], "Value": v} for k, v in d["reqs"] if k in labels]
-                                     or None, columns=["Requirement", "Value"])
-                edited = st.data_editor(
-                    frame, num_rows="dynamic", hide_index=True, width="stretch", key="ui_reqs",
-                    column_config={
-                        "Requirement": st.column_config.SelectboxColumn(options=list(labels.values()), required=True),
-                        "Value": st.column_config.TextColumn(help="With unit, e.g. 150 psi, 10 bar, 4-20 mA, IP67"),
-                    })
-            budget = st.number_input("💵 Budget per unit (USD, 0 = no limit)", min_value=0.0,
-                                     value=float(d["budget"]), step=10.0)
+            if multi:
+                c1, c2 = st.columns([3, 1])
+                title = c1.text_input("🏗️ What is this for? (optional)", value=ext.title, key=f"ui_title_{n_ext}")
+                required = c2.date_input("📅 Required by (all items)",
+                                         value=ext.required_date or today + timedelta(days=14))
+            else:
+                title = ""
+            for i, d in enumerate(drafts):
+                category = agent.resolve_product(d["product"]) if d["product"] else None
+                box = st.container(border=multi)
+                with box:
+                    if multi:
+                        h1, h2 = st.columns([4, 1])
+                        h1.markdown(f"**Item {i + 1}**")
+                        include = h2.checkbox("Include", value=True, key=f"ui_inc_{n_ext}_{i}")
+                        c1, c2, c3 = st.columns([2, 1, 1])
+                    else:
+                        include = True
+                        c1, c2, c3 = st.columns([2, 1, 1])
+                    product = c1.text_input("📦 Product", value=d["product"], key=f"ui_prod_{n_ext}_{i}")
+                    try:
+                        qty_default = max(0, int(d.get("quantity") or (0 if not ext.ok else 1)))
+                    except (TypeError, ValueError):
+                        qty_default = 0
+                    quantity = c2.number_input("🔢 Quantity", min_value=0, value=qty_default, step=1,
+                                               key=f"ui_qty_{n_ext}_{i}")
+                    if multi:
+                        budget = c3.number_input("💵 Budget/unit (0 = none)", min_value=0.0,
+                                                 value=float(d.get("max_unit_price") or 0.0), step=10.0,
+                                                 key=f"ui_bud_{n_ext}_{i}")
+                    else:
+                        required = c3.date_input("📅 Required by",
+                                                 value=ext.required_date or today + timedelta(days=14))
+                    if category in SCHEMA:
+                        st.markdown("**🛠️ Technical requirements** · edit, add or delete rows")
+                    edited = _requirement_editor(category, d["requirements"], key=f"ui_reqs_{n_ext}_{i}")
+                    if not multi:
+                        budget = st.number_input("💵 Budget per unit (USD, 0 = no limit)", min_value=0.0,
+                                                 value=float(d.get("max_unit_price") or 0.0), step=10.0,
+                                                 key=f"ui_bud_{n_ext}_{i}")
+                widgets.append((include, product, quantity, budget, edited, category))
             confirmed = st.form_submit_button("Confirm and search suppliers", type="primary",
                                               icon=":material/travel_explore:")
 
         if confirmed:
-            cat = agent.resolve_product(product) if product else None
-            reqs, notes = [], []
-            if edited is not None and cat in SCHEMA:
-                by_label = {v["label"]: k for k, v in SCHEMA[cat].items()}
-                items = [{"spec": by_label.get(str(row["Requirement"])), "value": str(row["Value"]).strip()}
-                         for _, row in edited.iterrows()
-                         if str(row.get("Requirement") or "").strip() and str(row.get("Value") or "").strip()
-                         and str(row["Value"]).strip().lower() != "none"]
-                reqs, notes = parse_requirements(cat, items)
-            product_name = cat if cat in SCHEMA else product
-            check = validate_fields(product_name, quantity, required, today, raw_text=text,
-                                    requester=account.username, requirements=reqs,
-                                    max_unit_price=budget or None)
-            for note in notes:
-                st.warning(note)
-            if not check.ok:
-                for err in check.errors + [f"Missing: {m}" for m in check.missing]:
-                    st.error(err)
+            items = []
+            for include, product, quantity, budget, edited, category in widgets:
+                if not include:
+                    continue
+                cat = agent.resolve_product(product) if product else None
+                reqs = _editor_items(edited, cat if cat == category else None)
+                items.append({"product": product, "quantity": quantity, "requirements": reqs,
+                              "max_unit_price": budget or None})
+            if not items:
+                st.error("Select at least one product.")
+                check = None
             else:
-                try:
-                    ss["ui_rec"], ss["ui_activity"] = _run_search(agent, check.request, today)
-                    ss.pop("ui_submitted_case", None)
-                except Exception as exc:
-                    ss.pop("ui_rec", None)
-                    st.error(f"Could not produce a recommendation: {exc}")
+                check = agent.validate_lines(items, required, today, raw_text=text, requester=account.username)
+            if check is not None:
+                for note in check.notes:
+                    st.warning(note)
+                if not check.ok:
+                    for err in check.errors + [f"Missing: {m.replace('_', ' ')}" for m in check.missing]:
+                        st.error(err)
+                else:
+                    try:
+                        ss["ui_rec"], ss["ui_activity"] = _run_search(agent, check.lines, today, title.strip())
+                        ss.pop("ui_submitted_case", None)
+                    except Exception as exc:
+                        ss.pop("ui_rec", None)
+                        st.error(f"Could not produce a recommendation: {exc}")
             if ss.get("ui_rec") is not None:
                 st.rerun()  # redraw the page with the result and the collapsed activity log
 
     rec = ss.get("ui_rec")
+    build = None
     if rec is not None:
+        build = rec if isinstance(rec, BuildRecommendation) else BuildRecommendation.single(rec)
         activity = ss.get("ui_activity")
         if activity:
             with st.expander(f"🤖 Agent activity · {activity['title']}", expanded=False):
                 for line in activity["lines"]:
                     st.markdown(line)
         _section("Recommendation")
-        _show_recommendation(rec, agent.available_products(), full=True)
-        if rec.comparison.recommended is not None:
+        _show_build(build, agent.available_products(), full=True)
+        if build.orderable:
             case_id = ss.get("ui_submitted_case")
             if case_id:
                 st.info(f"Submitted for approval. Case ID: **{case_id}**. Approvers have been alerted. "
                         "No purchase has been made. Track it under My requests.")
             elif st.button("Submit for approval", key="ui_submit_btn", type="primary", icon=":material/send:"):
                 try:
-                    ss["ui_submitted_case"] = svc.submit(rec, account.username)
+                    ss["ui_submitted_case"] = svc.submit(build, account.username)
                     st.rerun()
                 except ApprovalError as exc:
                     st.error(str(exc))
@@ -664,19 +804,21 @@ def _new_request_tab(agent: ProcurementAgent, svc: ApprovalService, account: Acc
     stage = 1
     if ext is not None:
         stage = 2
-    if rec is not None and rec.comparison.recommended is not None:
+    if build is not None and build.orderable:
         stage = 3
     if ss.get("ui_submitted_case"):
         stage = len(STEPS) + 1
     steps_slot.markdown(_steps(stage), unsafe_allow_html=True)
 
 
-def _run_search(agent: ProcurementAgent, request, today: date):
-    """Run the agent with a live activity panel. Returns (recommendation, activity log)."""
+def _run_search(agent: ProcurementAgent, requests: list, today: date, title: str = ""):
+    """Run the agent with a live activity panel. Returns (BuildRecommendation, activity log)."""
     import time
 
     lines: list[str] = []
-    state = {"thinking": 0, "start": time.monotonic(), "qualifying": 0, "suppliers": 0, "compared": False}
+    multi = len(requests) > 1
+    state = {"thinking": 0, "start": time.monotonic(), "qualifying": 0, "suppliers": 0, "compared": set(),
+             "line": 0}
 
     with st.status("🤖 Agent working: planning the supplier search", expanded=True) as status:
         def show(line: str, label: str | None = None) -> None:
@@ -687,47 +829,66 @@ def _run_search(agent: ProcurementAgent, request, today: date):
 
         def on_event(e: dict) -> None:
             t = e.get("type")
+            line = e.get("line", 0)
+            req = requests[line] if 0 <= line < len(requests) else requests[0]
+            item = f"item {line + 1}/{len(requests)} · " if multi else ""
             if t == "thinking":
                 state["thinking"] += 1
                 if state["thinking"] == 1:
-                    show("🧠 **Amazon Bedrock** is planning which tools to call")
-                elif state["compared"]:
-                    show("✍️ **Amazon Bedrock** is writing the recommendation",
-                         "🤖 Agent working: writing the recommendation")
+                    plan = f"for {len(requests)} products" if multi else ""
+                    show(f"🧠 **Amazon Bedrock** is planning which tools to call {plan}".rstrip())
+                elif len(state["compared"]) >= len(requests) or (not multi and state["compared"]):
+                    what = "the purchase order summary" if multi else "the recommendation"
+                    show(f"✍️ **Amazon Bedrock** is writing {what}", f"🤖 Agent working: writing {what}")
             elif t == "search_start":
                 sites = ", ".join(x["site"] or x["supplier"] for x in e["suppliers"])
-                show(f"🔎 Searching **{len(e['suppliers'])} supplier catalogues** for **{e['product']}**: {sites}",
-                     f"🤖 Agent working: searching {len(e['suppliers'])} supplier catalogues")
-                for r in request.requirements:
-                    show(f"&nbsp;&nbsp;&nbsp;&nbsp;🛠️ must meet · {r.describe(request.product)}")
-                if request.max_unit_price:
-                    show(f"&nbsp;&nbsp;&nbsp;&nbsp;💵 budget · at most {request.max_unit_price:,.2f} USD per unit")
+                head = f"**Item {line + 1}/{len(requests)} · {req.quantity} x {e['product']}** · " if multi else ""
+                show(f"🔎 {head}Searching **{len(e['suppliers'])} supplier catalogues** for **{e['product']}**: {sites}",
+                     f"🤖 Agent working: {item}searching {len(e['suppliers'])} supplier catalogues")
+                for r in req.requirements:
+                    show(f"&nbsp;&nbsp;&nbsp;&nbsp;🛠️ must meet · {r.describe(req.product)}")
+                if req.max_unit_price:
+                    show(f"&nbsp;&nbsp;&nbsp;&nbsp;💵 budget · at most {req.max_unit_price:,.2f} USD per unit")
             elif t == "supplier":
                 name = e["site"] or e["supplier"]
                 b = e["best"]
+                pad = "&nbsp;&nbsp;&nbsp;&nbsp;" if multi else ""
                 if b:
                     stock = "in stock, " if b["from_stock"] else ""
-                    show(f"✅ **{name}** · {e['models']} model(s), {e['matching']} fit · best **{b['model']}** at "
+                    show(f"{pad}✅ **{name}** · {e['models']} model(s), {e['matching']} fit · best **{b['model']}** at "
                          f"{b['unit_price']:,.2f} {b['currency']}/unit, {stock}ships in {b['lead_time_days']} days "
                          f"· _{e['seconds']:.1f}s_")
                 else:
                     why = f" · {e['reasons'][0]}" if e["reasons"] else ""
-                    show(f"❌ **{name}** · {e['models']} model(s), none fit{why} · _{e['seconds']:.1f}s_")
+                    show(f"{pad}❌ **{name}** · {e['models']} model(s), none fit{why} · _{e['seconds']:.1f}s_")
             elif t == "search_done":
                 state["qualifying"], state["suppliers"] = e["qualifying"], e["suppliers"]
+                if multi and e["qualifying"] == 0:
+                    state["compared"].add(line)  # nothing to compare for this item
             elif t == "tool" and e.get("name") == "compare_quotes":
-                state["compared"] = True
-                show(f"⚖️ Comparing **{state['qualifying']} qualifying supplier(s)** on price and delivery date",
-                     "🤖 Agent working: comparing suppliers")
+                state["compared"].add(line)
+                show(f"⚖️ {item.capitalize()}Comparing qualifying suppliers on price and delivery date",
+                     f"🤖 Agent working: {item}comparing suppliers")
+            elif t == "auto":
+                show(f"⚙️ Item {line + 1}: the app ran the {e['step']} step the model skipped")
 
-        rec = agent.recommend(request, today, progress=on_event)
+        build = agent.recommend_plan(requests, today, title, progress=on_event)
         took = time.monotonic() - state["start"]
-        n = len(rec.comparison.ranked)
-        title = (f"{n} of {state['suppliers'] or n} suppliers qualify · {took:.1f}s" if rec.comparison.recommended
-                 else f"no qualifying supplier · {took:.1f}s")
+        if multi:
+            groups = build.po_groups()
+            done = len(build.orderable)
+            label = (f"{done} of {len(requests)} products matched · {len(groups)} purchase order(s) · {took:.1f}s")
+            if groups:
+                show("🧾 **Purchase order plan** · " + " · ".join(
+                    f"{supplier}: {len(idx)} item(s)" for supplier, idx in groups))
+        else:
+            rec = build.lines[0]
+            n = len(rec.comparison.ranked)
+            label = (f"{n} of {state['suppliers'] or n} suppliers qualify · {took:.1f}s" if rec.comparison.recommended
+                     else f"no qualifying supplier · {took:.1f}s")
         show(f"🏁 Done in {took:.1f}s · _{SIMULATED_NOTE}_")
-        status.update(label=f"✅ Agent finished: {title}", state="complete", expanded=False)
-    return rec, {"title": title, "lines": lines}
+        status.update(label=f"✅ Agent finished: {label}", state="complete", expanded=False)
+    return build, {"title": label, "lines": lines}
 
 
 def _my_requests_tab(svc: ApprovalService, account: Account) -> None:
@@ -746,7 +907,7 @@ def _my_requests_tab(svc: ApprovalService, account: Account) -> None:
         with st.expander(_case_title(case), expanded=case is cases[-1]):
             _case_facts(case, show_requester=False)
             _show_outcome(svc, case)
-            _show_recommendation(case.recommendation, full=False)
+            _show_build(_case_build(case), full=False, quotes=case.chosen_quotes or None)
 
 
 def _requester_home(agent, svc, account, today) -> None:
@@ -767,33 +928,57 @@ def _approval_queue_tab(svc: ApprovalService, account: Account, alerts: AlertSto
         return
     user = account.as_user()
     for case in pending:  # oldest first
-        rec = case.recommendation
         with st.expander(_case_title(case), expanded=True):
             _case_facts(case)
-            _show_recommendation(rec, full=False)
+            _show_build(_case_build(case), full=False)
             if case.submitted_by == account.username:
                 st.warning("You submitted this request, so another approver must decide it.")
                 continue
             with st.container(border=True):
                 _section("Your decision")
-                suppliers = [s.quote.supplier for s in rec.comparison.ranked]
-                c1, c2 = st.columns([1, 2])
-                chosen = c1.selectbox("Supplier", suppliers, index=0, key=f"ui_sup_{case.case_id}")
-                comment = c2.text_input("Comment (required to reject or to choose another supplier)",
-                                        key=f"ui_cmt_{case.case_id}")
+                picks: dict[int, str] = {}
+                if case.is_build:
+                    st.caption("Supplier per product. Change one only with a reason in the comment.")
+                    cols = st.columns(min(3, len(case.lines)))
+                    for i, r in enumerate(case.lines):
+                        options = [s.quote.supplier for s in r.comparison.ranked]
+                        picks[i] = cols[i % len(cols)].selectbox(
+                            f"{i + 1}. {r.request.quantity} x {r.request.product}", options, index=0,
+                            key=f"ui_sup_{case.case_id}_{i}")
+                    chosen_quotes = [next(s.quote for s in r.comparison.ranked if s.quote.supplier == picks[i])
+                                     for i, r in enumerate(case.lines)]
+                    groups = group_by_supplier(chosen_quotes)
+                    changed = any(picks[i] != r.comparison.recommended.quote.supplier for i, r in enumerate(case.lines))
+                    if changed:
+                        _po_plan(case.lines, chosen_quotes, heading=f"With your changes: {len(groups)} purchase order(s)")
+                    comment = st.text_input("Comment (required to reject or to choose another supplier)",
+                                            key=f"ui_cmt_{case.case_id}")
+                    chosen = None
+                else:
+                    rec = case.recommendation
+                    suppliers = [s.quote.supplier for s in rec.comparison.ranked]
+                    c1, c2 = st.columns([1, 2])
+                    chosen = c1.selectbox("Supplier", suppliers, index=0, key=f"ui_sup_{case.case_id}")
+                    comment = c2.text_input("Comment (required to reject or to choose another supplier)",
+                                            key=f"ui_cmt_{case.case_id}")
+                    groups = [(chosen, [0])]
                 b1, b2 = st.columns(2)
                 if b1.button("Approve", key=f"ui_approve_{case.case_id}", type="primary", width="stretch",
                              icon=":material/check_circle:"):
-                    _decide(svc, case.case_id, user, True, comment, chosen, alerts)
+                    _decide(svc, case.case_id, user, True, comment, chosen, alerts, picks or None)
                 if b2.button("Reject", key=f"ui_reject_{case.case_id}", width="stretch",
                              icon=":material/cancel:"):
-                    _decide(svc, case.case_id, user, False, comment, chosen, alerts)
-                st.caption("Approving issues a numbered PDF purchase order for the selected supplier.")
+                    _decide(svc, case.case_id, user, False, comment, chosen, alerts, picks or None)
+                n = len(groups)
+                st.caption(f"Approving issues {n} numbered PDF purchase order{'s' if n != 1 else ''}, one per supplier."
+                           if case.is_build else
+                           "Approving issues a numbered PDF purchase order for the selected supplier.")
 
 
-def _decide(svc, case_id, user, approve, comment, chosen, alerts: AlertStore | None = None) -> None:
+def _decide(svc, case_id, user, approve, comment, chosen, alerts: AlertStore | None = None,
+            line_suppliers: dict | None = None) -> None:
     try:
-        svc.decide(case_id, user, approve, comment, chosen)
+        svc.decide(case_id, user, approve, comment, chosen, line_suppliers=line_suppliers)
         if alerts is not None:
             alerts.mark_read(user.name, case_id)
         st.rerun()
@@ -810,14 +995,15 @@ def _history_tab(svc: ApprovalService, account: Account) -> None:
         with st.expander(_case_title(case), expanded=False):
             _case_facts(case)
             _show_outcome(svc, case)
-            if case.status == APPROVED and case.purchase_order is None:
-                if st.button("Generate purchase order", key=f"ui_po_{case.case_id}", icon=":material/description:"):
+            if case.status == APPROVED:
+                label = "Generate purchase orders" if case.is_build else "Generate purchase order"
+                if st.button(label, key=f"ui_po_{case.case_id}", icon=":material/description:"):
                     try:
-                        svc.issue_po(case.case_id, account.as_user())
+                        svc.issue_pos(case.case_id, account.as_user())
                         st.rerun()
                     except ApprovalError as exc:
                         st.error(str(exc))
-            _show_recommendation(case.recommendation, full=False)
+            _show_build(_case_build(case), full=False, quotes=case.chosen_quotes or None)
 
 
 def _active_alerts(svc: ApprovalService, alerts: AlertStore, account: Account) -> list:
@@ -879,7 +1065,7 @@ def _approver_home(svc: ApprovalService, account: Account, alerts: AlertStore | 
                 delta=f"oldest waiting {oldest} day(s)" if oldest >= 1 else None, delta_color="off")
     m[1].metric("Value waiting", f"{sum(_case_value(c) for c in pending):,.0f} USD")
     m[2].metric("Approved", len(approved))
-    m[3].metric("POs issued", sum(c.status == PO_ISSUED for c in all_cases))
+    m[3].metric("POs issued", sum(len(c.purchase_orders) for c in all_cases))
     st.write("")
     tab_queue, tab_hist = st.tabs([f"Approval queue ({len(pending)})", "Decision history"])
     with tab_queue:

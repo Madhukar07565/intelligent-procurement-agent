@@ -69,9 +69,12 @@ def case_to_dict(case: "Case") -> dict:
         "submitted_at": case.submitted_at,
         "status": case.status,
         "recommendation": recommendation_to_dict(case.recommendation),
+        "extra_lines": [recommendation_to_dict(r) for r in case.extra_lines],
+        "title": case.title,
+        "summary": case.summary,
         "decision": asdict(case.decision) if case.decision else None,
-        "chosen_quote": case.chosen_quote.to_dict() if case.chosen_quote else None,
-        "purchase_order": case.purchase_order.to_dict() if case.purchase_order else None,
+        "chosen_quotes": [q.to_dict() for q in case.chosen_quotes],
+        "purchase_orders": [po.to_dict() for po in case.purchase_orders],
         "po_error": case.po_error,
     }
 
@@ -85,11 +88,29 @@ def case_from_dict(d: dict) -> "Case":
         submitted_by=d["submitted_by"],
         submitted_at=d.get("submitted_at", ""),
         status=d["status"],
-        decision=Decision(**d["decision"]) if d.get("decision") else None,
-        chosen_quote=Quote.from_dict(d["chosen_quote"]) if d.get("chosen_quote") else None,
-        purchase_order=PurchaseOrder(**d["purchase_order"]) if d.get("purchase_order") else None,
+        decision=_decision_from_dict(d["decision"]) if d.get("decision") else None,
+        # Cases stored before multi-product support have single chosen_quote / purchase_order keys.
+        chosen_quotes=[Quote.from_dict(q) for q in d.get("chosen_quotes")
+                       or ([d["chosen_quote"]] if d.get("chosen_quote") else [])],
+        purchase_orders=[_po_from_dict(p) for p in d.get("purchase_orders")
+                         or ([d["purchase_order"]] if d.get("purchase_order") else [])],
         po_error=d.get("po_error"),
+        extra_lines=[recommendation_from_dict(r) for r in d.get("extra_lines") or []],
+        title=d.get("title", ""),
+        summary=d.get("summary", ""),
     )
+
+
+def _decision_from_dict(d: dict) -> Decision:
+    d = dict(d)
+    d["line_suppliers"] = tuple(d.get("line_suppliers") or ())
+    return Decision(**d)
+
+
+def _po_from_dict(d: dict) -> PurchaseOrder:
+    d = dict(d)
+    d["lines"] = tuple(d.get("lines") or ())
+    return PurchaseOrder(**d)
 
 
 # ---- store ---------------------------------------------------------------
@@ -154,9 +175,9 @@ class SqliteCaseStore:
                 for case_id, raw in rows:
                     d = json.loads(raw)
                     d["submitted_by"] = new
-                    req = d["recommendation"]["request"]
-                    if req.get("requester") == old:
-                        req["requester"] = new
+                    for line in [d["recommendation"], *d.get("extra_lines", [])]:
+                        if line["request"].get("requester") == old:
+                            line["request"]["requester"] = new
                     self._conn.execute("UPDATE cases SET submitted_by = ?, data = ? WHERE case_id = ?",
                                        (new, json.dumps(d), case_id))
                 self._conn.execute("COMMIT")

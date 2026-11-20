@@ -37,16 +37,34 @@ class PurchaseOrder:
     recommended_supplier: str
     model: str = ""            # supplier model / part number
     specification: str = ""    # e.g. '0-150 psi · 4-20 mA · ±0.25% · 1/4" NPT'
+    # All line items on this PO. The top-level product/model/quantity/unit_price fields describe
+    # line 1; total_price is the PO total. Older single-item POs have no `lines`.
+    lines: tuple = ()
+    build_title: str = ""      # e.g. "Engine test stand"; empty for a single-product request
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        d = asdict(self)
+        d["lines"] = [dict(x) for x in self.lines]  # JSON-friendly, same as what is saved
+        return d
+
+    def items(self) -> list[dict]:
+        """Line items, also for single-item POs created before `lines` existed."""
+        if self.lines:
+            return [dict(x) for x in self.lines]
+        return [{"product": self.product, "model": self.model, "specification": self.specification,
+                 "quantity": self.quantity, "unit_price": self.unit_price, "amount": self.total_price,
+                 "currency": self.currency, "quote_ref": self.quote_ref, "delivery_date": self.delivery_date,
+                 "required_date": self.required_date, "recommended_supplier": self.recommended_supplier}]
 
     def to_markdown(self) -> str:
-        override = (
+        items = self.items()
+        overrides = [x for x in items if x.get("recommended_supplier") and x["recommended_supplier"] != self.supplier]
+        override = "".join(
             f"\n> Approver chose {self.supplier} instead of the recommended supplier "
-            f"{self.recommended_supplier}. Reason: {self.approval_comment}\n"
-            if self.supplier != self.recommended_supplier else ""
-        )
+            f"{x['recommended_supplier']} for {x['product']}. Reason: {self.approval_comment}\n" for x in overrides)
+        rows = "\n".join(
+            f"| {x['product']}{' (' + x['model'] + ')' if x.get('model') else ''} | {x['quantity']} | "
+            f"{x['unit_price']:,.2f} {self.currency} | {x['amount']:,.2f} {self.currency} |" for x in items)
         return f"""# Purchase Order {self.po_number}
 
 Issued: {self.issued_at}
@@ -58,7 +76,8 @@ Case: {self.case_id}
 ## Order
 | Product | Quantity | Unit price | Total |
 |---|---|---|---|
-| {self.product} | {self.quantity} | {self.unit_price:,.2f} {self.currency} | {self.total_price:,.2f} {self.currency} |
+{rows}
+| **Total** | | | **{self.total_price:,.2f} {self.currency}** |
 
 Expected delivery: {self.delivery_date} (required by {self.required_date})
 

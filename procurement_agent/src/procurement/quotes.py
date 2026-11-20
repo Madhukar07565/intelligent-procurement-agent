@@ -130,6 +130,22 @@ class QuoteRepository:
                 names.add(normalize_product(row["product"]))
         return sorted(names)
 
+    def spec_vocabulary(self, category: str) -> dict[str, set[str]]:
+        """Words used for each text spec of a category across the catalogues (normalized)."""
+        from .specs import _norm_text
+        vocab: dict[str, set[str]] = {}
+        text_specs = {k for k, d in SCHEMA.get(category, {}).items() if d["kind"] == "text"}
+        for row in self._rows:
+            try:
+                if normalize_product(str(row["product"])) != category:
+                    continue
+            except (KeyError, TypeError):
+                continue
+            for k, v in (row.get("specs") or {}).items():
+                if k in text_specs:
+                    vocab.setdefault(k, set()).update(_norm_text(v).split())
+        return vocab
+
     def resolve(self, product: str) -> str | None:
         return resolve_product(product, self.products())
 

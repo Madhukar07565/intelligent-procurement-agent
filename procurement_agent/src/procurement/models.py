@@ -152,3 +152,50 @@ class Decision:
     comment: str
     chosen_supplier: str | None
     timestamp: str
+    line_suppliers: tuple = ()   # approved supplier per line, for multi-product requests
+
+
+def group_by_supplier(quotes: list["Quote | None"]) -> list[tuple[str, list[int]]]:
+    """Line indexes grouped by supplier, in first-appearance order. One group = one purchase order.
+
+    Lines without a quote (no qualifying supplier) are left out.
+    """
+    groups: dict[str, list[int]] = {}
+    for i, q in enumerate(quotes):
+        if q is not None:
+            groups.setdefault(q.supplier, []).append(i)
+    return list(groups.items())
+
+
+@dataclass(frozen=True)
+class BuildRecommendation:
+    """A request for several products (a bill of materials), one Recommendation per line.
+
+    Each line is searched and ranked on its own. Lines won by the same supplier are
+    combined into one purchase order, so the number of POs equals the number of
+    different winning suppliers.
+    """
+    title: str
+    lines: tuple[Recommendation, ...]
+    summary: str = ""
+
+    @staticmethod
+    def single(rec: Recommendation) -> "BuildRecommendation":
+        return BuildRecommendation("", (rec,), rec.explanation)
+
+    @property
+    def orderable(self) -> tuple[Recommendation, ...]:
+        """Lines with a qualifying supplier."""
+        return tuple(r for r in self.lines if r.comparison.recommended is not None)
+
+    @property
+    def unfilled(self) -> tuple[Recommendation, ...]:
+        """Lines no supplier can fulfil: shown to the user, never ordered."""
+        return tuple(r for r in self.lines if r.comparison.recommended is None)
+
+    def po_groups(self) -> list[tuple[str, list[int]]]:
+        """Purchase orders the recommendation implies, over `orderable` line indexes."""
+        return group_by_supplier([r.comparison.recommended.quote for r in self.orderable])
+
+    def total(self) -> float:
+        return round(sum(r.comparison.recommended.quote.total_price for r in self.orderable), 2)

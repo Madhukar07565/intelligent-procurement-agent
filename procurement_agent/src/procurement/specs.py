@@ -136,6 +136,45 @@ def _ip_level(code: Any) -> int:
     return int(m.group(1)) * 10 + int(m.group(2))
 
 
+def split_compound(category: str, items: list[dict] | None, vocab: dict[str, set[str]]) -> tuple[list[dict], list[str]]:
+    """Fix requirements where two specs were merged into one text value, e.g. housing 'M18 PNP'.
+
+    `vocab` maps each text spec to the words used for it in the supplier catalogues. A word
+    that belongs only to another text spec is moved there, if the user did not state that spec.
+    Returns (items, notes).
+    """
+    schema = SCHEMA.get(category)
+    if not schema or not items:
+        return list(items or []), []
+    out = [dict(i) for i in items if isinstance(i, dict)]
+    given = {str(i.get("spec")) for i in out}
+    notes = []
+    for item in list(out):
+        key = str(item.get("spec"))
+        if schema.get(key, {}).get("kind") != "text":
+            continue
+        words = str(item.get("value") or "").split()
+        if len(words) < 2:
+            continue
+        own = vocab.get(key, set())
+        keep, moved = [], {}
+        for w in words:
+            token = _norm_text(w)
+            homes = [k for k, v in vocab.items() if k != key and token in v and token not in own]
+            if homes and homes[0] not in given:
+                moved.setdefault(homes[0], []).append(w)
+            else:
+                keep.append(w)
+        if moved and keep:
+            item["value"] = " ".join(keep)
+            for target, ws in moved.items():
+                out.append({"spec": target, "value": " ".join(ws)})
+                given.add(target)
+                notes.append(f"Read '{' '.join(words)}' as {schema[key]['label']} '{item['value']}' and "
+                             f"{schema[target]['label']} '{' '.join(ws)}'.")
+    return out, notes
+
+
 def parse_requirements(category: str, items: list[dict] | None) -> tuple[list[Requirement], list[str]]:
     """Turn model-extracted items into validated Requirements. Returns (requirements, notes)."""
     schema = SCHEMA.get(category)
@@ -228,7 +267,8 @@ def summarize_specs(category: str, specs: dict[str, Any]) -> str:
             elif d["kind"] == "number" and d["unit"] == "C":
                 parts.append(f"{fmt_value(float(v))} °C")
             elif d["kind"] == "number" and d["unit"] == "mm":
-                parts.append(fmt_value(to_canonical(d, v), "mm"))
+                # The supplier's own figure ("2 in", "8 m"); plain numbers are millimetres.
+                parts.append(str(v) if isinstance(v, str) else fmt_value(to_canonical(d, v), "mm"))
             else:
                 parts.append(str(v))
     return " · ".join(parts)

@@ -47,6 +47,15 @@ def summarize(case: "Case") -> tuple[str, str]:
     """(subject, one-line summary) for a newly submitted case."""
     req = case.recommendation.request
     best = case.recommendation.comparison.recommended.quote
+    if case.is_build:
+        items = ", ".join(f"{r.request.quantity} x {r.request.product}" for r in case.lines)
+        groups = case.po_groups()
+        name = case.title or f"{len(case.lines)} products"
+        subject = f"Approval needed: {name}, {len(case.lines)} items ({case.case_id})"
+        summary = (f"{case.submitted_by} requested {items} by {req.required_date.isoformat()}. "
+                   f"Plan: {len(groups)} purchase order(s) ({', '.join(s for s, _ in groups)}), "
+                   f"total {case.total():,.2f} {best.currency}.")
+        return subject, summary
     subject = f"Approval needed: {req.quantity} x {req.product} ({case.case_id})"
     summary = (f"{case.submitted_by} requested {req.quantity} x {req.product} by {req.required_date.isoformat()}. "
                f"Recommended: {best.supplier}, {best.total_price:,.2f} {best.currency}.")
