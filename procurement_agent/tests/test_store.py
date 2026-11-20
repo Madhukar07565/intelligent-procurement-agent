@@ -127,3 +127,26 @@ def test_S10_concurrent_decisions_on_file_store_only_one_wins(tmp_path, repo):
     [t.join() for t in ts]
     assert results.count("ok") == 1
     assert len(list((tmp_path / "pos").glob("*.pdf"))) == 1
+
+
+def test_S11_renamed_requester_keeps_their_cases(tmp_path, repo):
+    import json as _json
+    s = service(tmp_path)
+    c1 = s.submit(rec_for(repo), "madhukar")
+    s.decide(c1, BOB, True, "ok")
+    c2 = s.submit(rec_for(repo, "monitor", 5), "madhukar")
+    other = s.submit(rec_for(repo, "office chair", 3), "carol")
+    moved = s.reassign_requester("madhukar", "madhukar.reddy@royalcyber.com", actor="admin")
+    assert moved == 2
+    s2 = service(tmp_path)  # fresh connection
+    mine = s2.list_cases(submitted_by="madhukar.reddy@royalcyber.com")
+    assert [c.case_id for c in mine] == [c1, c2]
+    assert s2.list_cases(submitted_by="madhukar") == []
+    assert s2.get(other).submitted_by == "carol"
+    # history is otherwise unchanged
+    assert s2.get(c1).status == PO_ISSUED and s2.get(c1).purchase_order.requested_by == "madhukar"
+    with pytest.raises(ApprovalError, match="own request"):
+        s2.decide(c2, User("madhukar.reddy@royalcyber.com", "approver"), True)
+    events = [_json.loads(x) for x in (tmp_path / "audit.jsonl").read_text().splitlines()]
+    [renamed] = [e for e in events if e["event"] == "requester_renamed"]
+    assert renamed["details"] == {"from": "madhukar", "to": "madhukar.reddy@royalcyber.com", "cases_moved": 2}

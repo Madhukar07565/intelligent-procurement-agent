@@ -113,6 +113,13 @@ class ApprovalService:
             raise ApprovalError("No purchase order has been issued for this case.")
         return self._po_issuer.pdf_bytes(case.purchase_order)
 
+    def reassign_requester(self, old: str, new: str, actor: str) -> int:
+        """Move a renamed requester's cases to the new username, with an audit record."""
+        with self._lock:
+            moved = self._store.reassign_submitter(old, new)
+        self._audit("requester_renamed", "-", actor, {"from": old, "to": new, "cases_moved": moved})
+        return moved
+
     def list_cases(self, submitted_by: str | None = None, statuses: list[str] | None = None) -> list[Case]:
         """Cases in submission order, optionally filtered by submitter and status."""
         return self._store.list(submitted_by, statuses)

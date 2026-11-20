@@ -474,7 +474,7 @@ def _login_screen(users: UserStore) -> None:
         st.subheader("Sign in")
         st.caption("Requesters and approvers have separate accounts.")
         with st.form("ui_login_form", border=True):
-            username = st.text_input("Username", key="ui_login_user", placeholder="e.g. madhukar")
+            username = st.text_input("Username", key="ui_login_user", placeholder="name or name@company.com")
             password = st.text_input("Password", type="password", key="ui_login_pass")
             submitted = st.form_submit_button("Sign in", type="primary", width="stretch",
                                               icon=":material/login:")

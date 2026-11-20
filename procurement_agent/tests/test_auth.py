@@ -116,3 +116,31 @@ def test_AU11_weak_password_only_with_explicit_flag(tmp_path):
     assert s.authenticate("demo1", "1234").role == "requester"
     with pytest.raises(AuthError, match="at least 4"):
         s.add_user("demo2", "123", "requester", allow_weak=True)
+
+
+@pytest.mark.parametrize("name", ["madhukar.reddy@royalcyber.com", "mreddy@dwyeromega.com", "MReddy@DwyerOmega.com",
+                                  "first.last+po@sub.example.co.uk", "madhukar"])
+def test_AU12_email_usernames_allowed(tmp_path, name):
+    s = UserStore(tmp_path / "u.json")
+    acct = s.add_user(name, "1234", "approver", allow_weak=True)
+    assert acct.username == name.lower()
+    assert s.authenticate(name.upper(), "1234").username == name.lower()   # case-insensitive sign-in
+
+
+@pytest.mark.parametrize("name", ["a@b", "x@y.c", "@royalcyber.com", "me@", "me@@x.com", "me @x.com",
+                                  "me@x..com", "<script>@x.com", "a" * 60 + "@x.com"])
+def test_AU13_bad_usernames_rejected(tmp_path, name):
+    with pytest.raises(AuthError, match="Username"):
+        UserStore(tmp_path / "u.json").add_user(name, "1234", "requester", allow_weak=True)
+
+
+def test_AU14_rename_keeps_role_and_password(users):
+    acct = users.rename_user("alice", "alice.r@royalcyber.com", "Alice R.")
+    assert (acct.username, acct.role, acct.display_name) == ("alice.r@royalcyber.com", "requester", "Alice R.")
+    assert users.authenticate("alice.r@royalcyber.com", "alice-pass-123").role == "requester"
+    with pytest.raises(AuthError):
+        users.authenticate("alice", "alice-pass-123")
+    with pytest.raises(AuthError, match="already exists"):
+        users.rename_user("alice.r@royalcyber.com", "bob")
+    with pytest.raises(AuthError, match="No such user"):
+        users.rename_user("ghost", "ghost2")

@@ -138,6 +138,29 @@ class SqliteCaseStore:
             rows = self._conn.execute(sql, args).fetchall()
         return [case_from_dict(json.loads(r[0])) for r in rows]
 
+    def reassign_submitter(self, old: str, new: str) -> int:
+        """Move every case submitted by `old` to `new`. Returns the number of cases changed.
+
+        Issued PO documents are not rewritten: they record who requested the order at the time.
+        """
+        with self._lock:
+            rows = self._conn.execute("SELECT case_id, data FROM cases WHERE submitted_by = ?", (old,)).fetchall()
+            self._conn.execute("BEGIN")
+            try:
+                for case_id, raw in rows:
+                    d = json.loads(raw)
+                    d["submitted_by"] = new
+                    req = d["recommendation"]["request"]
+                    if req.get("requester") == old:
+                        req["requester"] = new
+                    self._conn.execute("UPDATE cases SET submitted_by = ?, data = ? WHERE case_id = ?",
+                                       (new, json.dumps(d), case_id))
+                self._conn.execute("COMMIT")
+            except Exception:
+                self._conn.execute("ROLLBACK")
+                raise
+        return len(rows)
+
     def close(self) -> None:
         with self._lock:
             self._conn.close()

@@ -20,7 +20,18 @@ from typing import Callable
 from .approval import APPROVER, REQUESTER, User
 
 ROLES = (REQUESTER, APPROVER)
-USERNAME_RE = re.compile(r"^[a-z0-9._-]{3,32}$")
+# A short name (madhukar) or an email address (madhukar.reddy@royalcyber.com), lowercase.
+USERNAME_RE = re.compile(r"^[a-z0-9][a-z0-9._+-]*(@[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,})?$")
+USERNAME_MIN, USERNAME_MAX = 3, 64
+USERNAME_HELP = ("Username must be 3-64 characters: a short name using lowercase letters, digits, '.', '_', "
+                 "'+' or '-', or an email address.")
+
+
+def normalize_username(username: str) -> str:
+    username = (username or "").strip().lower()
+    if not (USERNAME_MIN <= len(username) <= USERNAME_MAX) or not USERNAME_RE.match(username):
+        raise AuthError(USERNAME_HELP)
+    return username
 MIN_PASSWORD_LENGTH = 8
 MIN_WEAK_PASSWORD_LENGTH = 4  # only with allow_weak=True (demo accounts)
 MAX_FAILED_ATTEMPTS = 5
@@ -86,9 +97,7 @@ class UserStore:
 
     def add_user(self, username: str, password: str, role: str, display_name: str = "",
                  allow_weak: bool = False) -> Account:
-        username = username.strip().lower()
-        if not USERNAME_RE.match(username):
-            raise AuthError("Username must be 3-32 characters: lowercase letters, digits, '.', '_' or '-'.")
+        username = normalize_username(username)
         if role not in ROLES:
             raise AuthError(f"Role must be one of: {', '.join(ROLES)}.")
         self._check_password(password, allow_weak)
@@ -111,6 +120,24 @@ class UserStore:
             users[username]["salt"], users[username]["hash"] = hash_password(password)
             self._save(users)
             self._failures.pop(username, None)
+
+    def rename_user(self, old: str, new: str, display_name: str = "") -> Account:
+        """Change a username, keeping role and password. Callers must also move the user's cases."""
+        old = (old or "").strip().lower()
+        new = normalize_username(new)
+        with self._lock:
+            users = self._load()
+            if old not in users:
+                raise AuthError(f"No such user: {old}")
+            if new in users:
+                raise AuthError(f"User {new} already exists.")
+            record = users.pop(old)
+            if display_name.strip():
+                record["display_name"] = display_name.strip()
+            users[new] = record
+            self._save(users)
+            self._failures.pop(old, None)
+        return Account(new, record["role"], record.get("display_name", new))
 
     def remove_user(self, username: str) -> None:
         with self._lock:
