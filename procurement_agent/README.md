@@ -19,7 +19,7 @@ AWS credentials must be available (standard boto3 chain) with access to a Bedroc
 | `AUDIT_PATH` | `data/audit.jsonl` |
 | `BEDROCK_MIN_INTERVAL_SECONDS` | `1.2` (cannot be set below 1.05; hackathon rule is under 1 request/second) |
 | `PO_DIR` | `data/purchase_orders` |
-| `BUYER_NAME`, `BUYER_ADDRESS`, `BUYER_EMAIL` | Example values; printed on the PO PDF |
+| `BUYER_NAME`, `BUYER_ADDRESS`, `BUYER_EMAIL` | RoyalCyber, 55 Shuman Blvd, Suite 275, Naperville, Illinois 60563, USA; email is a placeholder. Printed on the PO PDF |
 
 ## Run
 

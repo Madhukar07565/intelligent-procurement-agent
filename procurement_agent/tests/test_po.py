@@ -243,3 +243,13 @@ def test_PO17_no_pdf_for_unapproved_case(svc, rec):
     cid = svc.submit(rec, "alice")
     with pytest.raises(ApprovalError):
         svc.po_pdf(cid)
+
+
+def test_PO18_default_buyer_is_royalcyber(svc, rec, monkeypatch):
+    for var in ("BUYER_NAME", "BUYER_ADDRESS"):
+        monkeypatch.delenv(var, raising=False)
+    cid = svc.submit(rec, "alice")
+    svc.decide(cid, BOB, True)
+    text = pdf_text(svc.po_pdf(cid))
+    for line in ["RoyalCyber", "55 Shuman Blvd, Suite 275", "Naperville, Illinois 60563", "USA"]:
+        assert line in text, line

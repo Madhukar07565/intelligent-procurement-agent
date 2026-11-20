@@ -16,8 +16,10 @@ class Buyer:
     @staticmethod
     def from_env() -> "Buyer":
         return Buyer(
-            name=os.getenv("BUYER_NAME", "Example Corp Procurement"),
-            address=os.getenv("BUYER_ADDRESS", "100 Main Street, Springfield"),
+            name=os.getenv("BUYER_NAME", "RoyalCyber"),
+            # "\n" (or a literal "\n" in the env var) starts a new line on the PO.
+            address=os.getenv("BUYER_ADDRESS",
+                              "55 Shuman Blvd, Suite 275\nNaperville, Illinois 60563\nUSA").replace("\\n", "\n"),
             email=os.getenv("BUYER_EMAIL", "procurement@example.com"),
         )
 
