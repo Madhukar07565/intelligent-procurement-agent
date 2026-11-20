@@ -196,3 +196,25 @@ def test_UI11_incomplete_request_asks_for_details(make_app):
     warnings = " ".join(w.value for w in at.warning)
     assert "Missing: quantity" in warnings and "Missing: required date" in warnings
     assert btn(at, "Submit for approval") is None
+
+
+def test_UI12_untrusted_text_is_escaped_in_html_cards(make_app):
+    """Supplier names and AI text come from outside the app and must not inject HTML."""
+    at = login(make_app(), "alice")
+    from datetime import date
+    from procurement.agent import validate_fields
+    agent = at.session_state["agent"]
+    req = validate_fields("laptop", 50, date(2026, 12, 15), date(2026, 11, 20)).request
+    rec = agent.recommend(req, date(2026, 11, 20))
+    from dataclasses import replace
+    evil = "<img src=x onerror=alert(1)>"
+    best = rec.comparison.recommended
+    bad_quote = replace(best.quote, supplier=evil)
+    bad_best = replace(best, quote=bad_quote)
+    comparison = replace(rec.comparison, ranked=[bad_best] + rec.comparison.ranked[1:], recommended=bad_best)
+    at.session_state["ui_rec"] = replace(rec, comparison=comparison, explanation="<script>alert(2)</script>")
+    at.run()
+    assert not at.exception
+    page = " ".join(m.value for m in at.markdown)
+    assert "<img src=x" not in page and "<script>alert" not in page
+    assert "&lt;img src=x onerror=alert(1)&gt;" in page and "&lt;script&gt;" in page
