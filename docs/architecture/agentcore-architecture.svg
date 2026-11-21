@@ -70,8 +70,8 @@
   <rect x="480" y="140" width="250" height="190" rx="10" fill="#ecfdf5" stroke="#059669" stroke-width="1.6"/>
   <text x="605" y="166" class="t" text-anchor="middle">Procurement Agent</text>
   <text x="605" y="183" class="xs" text-anchor="middle">container from Amazon ECR · HTTP protocol</text>
-  <rect x="495" y="195" width="220" height="24" class="chip"/><text x="605" y="211" class="ct" text-anchor="middle">extract_request (forced tool)</text>
-  <rect x="495" y="225" width="220" height="24" class="chip"/><text x="605" y="241" class="ct" text-anchor="middle">tool loop · max 6 iterations</text>
+  <rect x="495" y="195" width="220" height="24" class="chip"/><text x="605" y="211" class="ct" text-anchor="middle">extract_request · one or many products</text>
+  <rect x="495" y="225" width="220" height="24" class="chip"/><text x="605" y="241" class="ct" text-anchor="middle">tool loop per product line</text>
   <rect x="495" y="255" width="220" height="24" class="chip"/><text x="605" y="271" class="ct" text-anchor="middle">Bedrock rate limit · under 1 req/s</text>
   <rect x="495" y="285" width="220" height="24" class="chip" style="stroke:#fca5a5"/><text x="605" y="301" class="ct" text-anchor="middle" fill="#991b1b">no approval or ordering tools</text>
 
@@ -145,10 +145,10 @@
   <text x="1510" y="274" class="s" text-anchor="middle">Gateway targets (read-only)</text>
   <rect x="1330" y="290" width="360" height="44" class="chip"/>
   <text x="1510" y="308" class="ct" text-anchor="middle" font-weight="700">get_supplier_quotes</text>
-  <text x="1510" y="324" class="xs" text-anchor="middle">validate rows, drop expired, compute totals and delivery dates</text>
+  <text x="1510" y="324" class="xs" text-anchor="middle">per product: spec checks, volume pricing, stock, MOQ, budget</text>
   <rect x="1330" y="342" width="360" height="44" class="chip"/>
   <text x="1510" y="360" class="ct" text-anchor="middle" font-weight="700">compare_quotes</text>
-  <text x="1510" y="376" class="xs" text-anchor="middle">deterministic score: 60% price, 40% delivery, deadline first</text>
+  <text x="1510" y="376" class="xs" text-anchor="middle">per product: deadline first, then 60% price, 40% delivery</text>
   <line x1="1262" y1="320" x2="1308" y2="320" stroke="#334155" stroke-width="1.6" marker-end="url(#a)"/>
 
   <!-- CloudWatch -->
@@ -192,7 +192,7 @@
   <text x="1030" y="672" class="xs">• built-in evaluators: correctness,</text>
   <text x="1030" y="687" class="xs">   faithfulness, helpfulness</text>
   <text x="1030" y="705" class="xs">• online scoring of live traces</text>
-  <text x="1030" y="723" class="xs">• plus the 213 offline pytest tests</text>
+  <text x="1030" y="723" class="xs">• plus the 292 offline pytest tests</text>
   <line x1="1155" y1="558" x2="1155" y2="522" stroke="#94a3b8" stroke-width="1.4" stroke-dasharray="4 4" marker-start="url(#ag)"/>
   <text x="1162" y="545" class="xs">reads traces</text>
 
@@ -200,8 +200,8 @@
   <rect x="1310" y="440" width="400" height="480" rx="8" fill="#f8fafc" stroke="#64748b" stroke-width="1.4" stroke-dasharray="7 5"/>
   <text x="1326" y="462" class="lbl" fill="#334155">Data · synthetic only · encrypted with KMS</text>
   <rect x="1330" y="475" width="360" height="66" rx="10" fill="#ffffff" stroke="#3b48cc" stroke-width="1.4"/>
-  <text x="1510" y="500" class="t" text-anchor="middle">DynamoDB · SupplierQuotes</text>
-  <text x="1510" y="520" class="xs" text-anchor="middle">seeded from data/quotes.json by CDK</text>
+  <text x="1510" y="500" class="t" text-anchor="middle">DynamoDB · SupplierCatalog</text>
+  <text x="1510" y="520" class="xs" text-anchor="middle">5 suppliers · 29 models · mocked prices (data/quotes.json)</text>
   <line x1="1660" y1="407" x2="1660" y2="473" stroke="#334155" stroke-width="1.6" marker-end="url(#a)"/>
   <circle cx="1676" cy="424" r="9" class="num"/><text x="1676" y="428" class="numt">5</text>
   <rect x="1330" y="600" width="360" height="66" rx="10" fill="#ffffff" stroke="#3b48cc" stroke-width="1.4"/>
@@ -209,7 +209,7 @@
   <text x="1510" y="645" class="xs" text-anchor="middle">used by the Gateway interceptor · TTL cleanup</text>
   <rect x="1330" y="755" width="360" height="66" rx="10" fill="#ffffff" stroke="#3b48cc" stroke-width="1.4"/>
   <text x="1510" y="780" class="t" text-anchor="middle">DynamoDB · Cases &amp; AuditLog</text>
-  <text x="1510" y="800" class="xs" text-anchor="middle">requests, decisions, PO numbers (replaces SQLite)</text>
+  <text x="1510" y="800" class="xs" text-anchor="middle">one request per supplier, decisions, POs (replaces SQLite)</text>
   <rect x="1330" y="840" width="360" height="66" rx="10" fill="#ffffff" stroke="#7aa116" stroke-width="1.4"/>
   <text x="1510" y="865" class="t" text-anchor="middle">Amazon S3 · purchase-orders</text>
   <text x="1510" y="885" class="xs" text-anchor="middle">PDF POs · block public access · presigned download</text>
@@ -225,20 +225,20 @@
   <text x="545" y="896" class="xs" text-anchor="middle">validates the JWT</text>
   <rect x="680" y="838" width="190" height="66" rx="10" fill="#ffffff" stroke="#ed7100" stroke-width="1.4"/>
   <text x="775" y="862" class="t" text-anchor="middle">Approval Lambda</text>
-  <text x="775" y="882" class="xs" text-anchor="middle">approver group, self-approval,</text>
-  <text x="775" y="896" class="xs" text-anchor="middle">expiry, one decision per case</text>
+  <text x="775" y="882" class="xs" text-anchor="middle">1 request per supplier;</text>
+  <text x="775" y="896" class="xs" text-anchor="middle">approver, expiry, one decision</text>
   <rect x="920" y="838" width="190" height="66" rx="10" fill="#ffffff" stroke="#ed7100" stroke-width="1.4"/>
   <text x="1015" y="862" class="t" text-anchor="middle">PO Lambda</text>
-  <text x="1015" y="882" class="xs" text-anchor="middle">numbered PDF PO</text>
-  <text x="1015" y="896" class="xs" text-anchor="middle">RoyalCyber as buyer</text>
+  <text x="1015" y="882" class="xs" text-anchor="middle">1 PDF PO per approved request,</text>
+  <text x="1015" y="896" class="xs" text-anchor="middle">all its items · RoyalCyber buyer</text>
   <line x1="632" y1="871" x2="678" y2="871" stroke="#334155" stroke-width="1.6" marker-end="url(#a)"/>
   <line x1="872" y1="871" x2="918" y2="871" stroke="#334155" stroke-width="1.6" marker-end="url(#a)"/>
   <path d="M775,836 L775,785 L1328,785" fill="none" stroke="#334155" stroke-width="1.6" marker-end="url(#a)"/>
   <line x1="1112" y1="873" x2="1328" y2="873" stroke="#334155" stroke-width="1.6" marker-end="url(#a)"/>
   <!-- app -> approval API -->
   <path d="M220,420 L236,420 L236,871 L458,871" fill="none" stroke="#334155" stroke-width="1.6" marker-end="url(#a)"/>
-  <text x="270" y="862" class="al">approve / reject</text>
-  <text x="270" y="890" class="al">+ approver JWT</text>
+  <text x="270" y="862" class="al">approve / reject each</text>
+  <text x="270" y="890" class="al">supplier request + JWT</text>
   <circle cx="420" cy="871" r="9" class="num"/><text x="420" y="875" class="numt">9</text>
 
   <!-- ===== Platform bar ===== -->

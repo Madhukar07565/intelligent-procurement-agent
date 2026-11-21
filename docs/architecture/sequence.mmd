@@ -4,7 +4,6 @@ sequenceDiagram
     participant UI as Streamlit app
     participant C as Amazon Cognito
     participant RT as AgentCore Runtime<br/>(Procurement Agent)
-    participant M as AgentCore Memory
     participant G as Bedrock Guardrails
     participant LLM as Amazon Nova Lite
     participant GW as AgentCore Gateway<br/>(Policy + interceptor)
@@ -18,52 +17,47 @@ sequenceDiagram
     R->>UI: Sign in
     UI->>C: Authenticate
     C-->>UI: JWT (group = requester)
-    R->>UI: "I need 50 laptops by Dec 15"
+    R->>UI: "To build our test stand we need 100 pressure sensors,<br/>6 flow meters and 200 proximity sensors by Jan 30"
     UI->>RT: POST /invocations + JWT
     RT->>O: Start trace
     RT->>G: Check input (prompt attack, denied topics)
-    G-->>RT: Allowed
-    RT->>M: Load session history
     RT->>LLM: Converse, forced extract_request tool
-    LLM-->>RT: product, quantity, required date
-    RT-->>UI: Extracted fields
-    R->>UI: Confirm or edit fields
-    UI->>RT: POST /invocations (confirmed request)
+    LLM-->>RT: 3 items: product, quantity, specs, budget, one date
+    RT->>RT: Validate, convert units, split merged specs
+    RT-->>UI: Products and specs to confirm
+    R->>UI: Confirm or edit each product
+    UI->>RT: POST /invocations (confirmed products)
     RT->>LLM: Converse with Gateway tool list
-    LLM-->>RT: call get_supplier_quotes
-    RT->>GW: MCP tools/call + OAuth token (AgentCore Identity)
-    GW->>GW: Policy check (Cedar, default deny) and rate limit
-    GW->>T: get_supplier_quotes(confirmed product, quantity)
-    T->>DB: Query SupplierQuotes
-    DB-->>T: Quote rows
-    T-->>GW: Valid quotes + excluded rows
-    GW-->>RT: Tool result
-    RT->>LLM: Tool result
-    LLM-->>RT: call compare_quotes
-    RT->>GW: MCP tools/call
-    GW->>T: compare_quotes(confirmed date, weights)
-    T-->>GW: Ranking, recommended supplier, warnings
-    GW-->>RT: Tool result
-    RT->>LLM: Tool result
-    LLM-->>RT: Explanation text
+    LLM-->>RT: get_supplier_quotes and compare_quotes for each line
+    loop For each product line
+        RT->>GW: MCP tools/call (line n) + OAuth token
+        GW->>GW: Policy check (Cedar, default deny) and rate limit
+        GW->>T: get_supplier_quotes(confirmed line n)
+        T->>DB: Read SupplierCatalog for the category
+        T->>T: Spec checks, volume price, stock, MOQ, budget
+        T-->>RT: Best qualifying model per supplier + rejected models with reasons
+        RT->>GW: compare_quotes(line n)
+        GW->>T: Rank: deadline first, then 60% price / 40% delivery
+        T-->>RT: Ranking and recommended supplier
+    end
+    RT->>RT: Group lines by winning supplier
+    RT->>LLM: Tool results
+    LLM-->>RT: Summary for the approver
     RT->>G: Check output (PII, grounding)
-    G-->>RT: Allowed
-    RT->>M: Save session events
     RT->>O: End trace (latency, tokens, tool calls)
-    RT-->>UI: Recommendation (ranking from tools, text from model)
-    R->>UI: Submit for approval
-    UI->>API: POST /cases + requester JWT
-    API->>DB: Save case (PENDING_APPROVAL)
+    RT-->>UI: Plan: 2 approval requests, 2 purchase orders
+    R->>UI: Submit (one click)
+    UI->>API: POST /orders + requester JWT
+    API->>DB: Save 1 approval request per supplier (shared order id)
 
     Note over RT,API: The agent has no tool or route to the Approval API.
 
-    A->>UI: Sign in (group = approver)
-    UI->>API: GET /cases?status=pending + approver JWT
-    API-->>UI: Pending cases
-    A->>UI: Approve
-    UI->>API: POST /cases/{id}/decision + approver JWT
-    API->>API: Check approver group claim, self-approval, quote expiry, one decision only
-    API->>DB: Save decision, audit event
-    API->>S3: Write PDF purchase order
-    API-->>UI: PO number + presigned download URL
-    UI-->>A: PO issued, Download PO (PDF)
+    A->>UI: Sign in (group = approver), alerted per request
+    loop For each supplier request (WIKA, DwyerOmega)
+        UI->>API: POST /requests/{id}/decision + approver JWT
+        API->>API: Approver group, no self-approval, quotes valid,<br/>one supplier for every product, one decision only
+        API->>DB: Save decision, audit event
+        API->>S3: Write 1 PDF purchase order with all its products
+        API-->>UI: PO number + presigned download URL
+    end
+    UI-->>A: 2 purchase orders, one per supplier

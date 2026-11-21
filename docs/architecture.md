@@ -9,46 +9,63 @@ Target: 4 hours, one developer. Python 3.11, Amazon Bedrock (Converse API), Stre
 1. **LLM understands and explains. Python decides and enforces.** The model extracts fields, chooses tools and writes the explanation. Ranking math and the approval gate are plain Python, so they are testable and cannot be talked around.
 2. **No purchase tool exists.** The model has no way to confirm a purchase. Only the approval service, called from a Streamlit button, can do that.
 3. **LLM behind an interface.** Tests use a fake client, so everything except the Bedrock call runs offline.
-4. **No database.** Quotes are read from JSON. Requests and decisions are appended to a JSON-lines audit file.
+4. **Small local stores.** The supplier catalogue is a JSON file. Requests, decisions and alerts are kept in SQLite, the audit trail in a JSON-lines file, and POs as PDF and JSON files.
+
+> **Current build (updated 21 November 2026).** Manufacturing products from five simulated supplier catalogues (real supplier names, mocked prices), technical spec matching, multi-product requests split into one approval request and one purchase order per supplier, separate requester and approver logins, and approver alerts.
 
 ## 2. Architecture diagram
 
+Rendered: [architecture/current-build.png](architecture/current-build.png)
+
 ```mermaid
 flowchart LR
-    U[Requester / Approver] --> UI[Streamlit app.py]
-    UI --> AG[ProcurementAgent]
-    AG <-->|Converse API + toolConfig| BR[(Amazon Bedrock)]
-    AG -->|tool call| TR[Tool registry]
+    R[Requester] --> UI
+    A[Approver] --> UI
+    UI[Streamlit app<br/>app.py, ui.py<br/>login, live agent panel] --> AUTH[auth.py<br/>users.json, scrypt hashes]
+    UI --> AG[ProcurementAgent<br/>agent.py]
+    AG <-->|Converse API + tools<br/>rate limit under 1 req/s| BR[(Amazon Bedrock<br/>Nova Lite, us-east-1)]
+    AG -->|tool call per product line| TR[ToolRegistry<br/>tools.py]
     TR --> QT[get_supplier_quotes]
     TR --> CT[compare_quotes]
-    QT --> QR[QuoteRepository]
-    QR --> JS[(data/quotes.json)]
-    CT --> CMP[comparison.py scoring]
-    UI --> AP[ApprovalService]
+    QT --> QR[QuoteRepository<br/>quotes.py: volume price,<br/>stock, MOQ, budget]
+    QR --> SP[specs.py<br/>unit conversion,<br/>spec checks]
+    QR --> JS[(data/quotes.json<br/>5 suppliers, 29 models<br/>mocked prices)]
+    CT --> CMP[comparison.py<br/>deadline first,<br/>60% price / 40% delivery]
+    AG -.->|BuildRecommendation:<br/>lines + PO plan| UI
+    UI -->|submit_build:<br/>1 request per supplier| AP[ApprovalService<br/>approval.py]
+    AP --> DB[(data/cases.db<br/>SQLite: requests, alerts)]
+    AP --> NT[notifications.py<br/>in-app alerts, optional SNS email]
+    AP -->|on approval:<br/>1 PO per request| PO[po.py, po_pdf.py<br/>PDF + JSON POs]
     AP --> AUD[(data/audit.jsonl)]
-    AG -.->|recommendation| UI
 ```
 
 ## 3. Flow
 
-1. User types a request. Agent calls Bedrock with a forced `extract_request` tool, which returns product, quantity and required date as structured data.
-2. UI shows the extracted values. User confirms or edits. Missing fields trigger a clarification message.
-3. Agent runs a tool loop: model calls `get_supplier_quotes`, then `compare_quotes`, then writes the explanation from the tool results.
-4. `Recommendation` object (ranked table, winner, explanation, warnings) is shown.
-5. Approver clicks Approve or Reject. `ApprovalService` checks role and self-approval, then records the decision. Only after approval is the purchase status "CONFIRMED".
+1. **Extract:** the requester describes one or several products. The agent calls Bedrock with a forced `extract_request` tool. It returns product, quantity, technical specs and budget for each product, plus one required date. Python validates every value, converts units (bar to psi, inches to mm), and splits specs the model merged, using the words in the catalogue.
+2. **Confirm:** the UI shows one block per product with an editable requirements table. Products can be excluded. Missing fields are asked for, never guessed.
+3. **Search:** the agent runs a tool loop. For each product line the model calls `get_supplier_quotes`, then `compare_quotes`. The confirmed values for that line always apply. `get_supplier_quotes` searches every supplier catalogue for the category and checks each model's specs. It applies volume pricing, stock, minimum order and budget, and keeps each supplier's best qualifying model. Rejected models are listed with their reasons. Any line the model skips is completed by the app. Bedrock then writes the summary. The live panel shows each step.
+4. **Plan:** lines won by the same supplier are grouped. The requester sees one card per supplier, which is one approval request and one purchase order.
+5. **Submit:** one click creates one approval request per supplier, linked by an order ID, and alerts the approvers.
+6. **Decide:** each request is approved or rejected on its own. The approver can move a request to another supplier only if that supplier quoted every product in it, and only with a comment. Role, self-approval, quote expiry and one-decision rules apply.
+7. **Purchase order:** approval issues exactly one numbered PDF PO per request, listing all of that supplier's products, with RoyalCyber as buyer.
 
 ## 4. Components
 
 | Component | File | Responsibility |
 |---|---|---|
-| Models | `models.py` | Dataclasses: `PurchaseRequest`, `Quote`, `ScoredQuote`, `Comparison`, `Recommendation`, `Decision` |
-| QuoteRepository | `quotes.py` | Load JSON, filter by product, drop expired quotes, compute total price and delivery date |
+| Models | `models.py` | `PurchaseRequest`, `Quote`, `ScoredQuote`, `Comparison`, `Recommendation`, `BuildRecommendation`, `Decision`, `group_by_supplier` |
+| Specs | `specs.py` | Spec schema per category, unit conversion, requirement parsing, spec checks, merged-spec splitting |
+| QuoteRepository | `quotes.py` | Catalogue search per supplier, validation, volume pricing, stock, MOQ, budget, progress events |
 | Comparison | `comparison.py` | Eligibility, normalization, weighted score, tie-breaks, late flags |
-| Tools | `tools.py` | Tool JSON specs (Bedrock format) and a dispatcher `run_tool(name, args)` |
-| LLM client | `llm.py` | `LLMClient` protocol, `BedrockClient` (boto3 `converse`) |
-| Agent | `agent.py` | `extract_request()` and `recommend()` with bounded tool loop |
-| ApprovalService | `approval.py` | State machine, role checks, audit log |
-| UI | `app.py`, `ui.py` | `app.py` wires real objects; `ui.py` holds the Streamlit screens |
+| Tools | `tools.py` | Tool specs (Bedrock format) and a line-aware registry that enforces the confirmed request |
+| LLM client | `llm.py` | `BedrockClient` (Converse), shared rate limiter, retries |
+| Agent | `agent.py` | `extract_request()`, `validate_lines()`, `recommend()`, `recommend_plan()` |
+| ApprovalService | `approval.py` | `submit_build()` (one request per supplier), decisions, PO issuing, audit log |
+| Store | `store.py` | SQLite persistence of requests |
+| Auth | `auth.py` | Requester and approver accounts, scrypt hashes, lockout |
+| Notifications | `notifications.py` | In-app approver alerts, optional Amazon SNS email |
+| Purchase orders | `po.py`, `po_pdf.py` | Numbered PO records and multi-line PDF documents |
+| UI | `app.py`, `ui.py` | Streamlit screens for both roles, live agent activity panel |
 
 ## 5. Project structure
 

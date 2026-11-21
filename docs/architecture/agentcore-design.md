@@ -28,7 +28,7 @@ The blueprint is a customer service agent. Its structure, read from its README a
 | R8 | **Observability**: AgentCore Observability exports OpenTelemetry traces, metrics and token usage to **CloudWatch**. | Traces for every request and tool call; approval-service audit events in CloudWatch Logs. | `audit.jsonl` file; no traces | Turn on AgentCore Observability; log the approval service to CloudWatch |
 | R9 | **Configuration in SSM Parameter Store, secrets in Secrets Manager**, both encrypted with **KMS**. The agent role can read only those. | Model ID, table names, guardrail ID and buyer details in SSM; Cognito client secret in Secrets Manager. | Environment variables | Move config to SSM and Secrets Manager |
 | R10 | **Least-privilege IAM**: each component has its own role, scoped to named resources (the agent role lists the specific memory, KB, guardrail and keys). | One role each for Runtime, Gateway, interceptor, tool Lambdas, approval Lambda and PO Lambda. | n/a (local) | Define roles in CDK |
-| R11 | **Evaluation** runs test queries from `groundtruth.json` with expected tool usage, then scores answers with an LLM judge (faithfulness, correctness, helpfulness). | `groundtruth.json` of purchase requests with expected tools and the expected winning supplier. | 213 offline pytest tests; no LLM-judged evaluation | Add evaluation set; run with AgentCore Evaluations |
+| R11 | **Evaluation** runs test queries from `groundtruth.json` with expected tool usage, then scores answers with an LLM judge (faithfulness, correctness, helpfulness). | `groundtruth.json` of purchase requests with expected tools and the expected winning supplier. | 292 offline pytest tests; no LLM-judged evaluation | Add evaluation set; run with AgentCore Evaluations |
 | R12 | **Infrastructure as code**, deployed from the repo; **clean-up** documented (destroy, then empty buckets and ECR). | All resources in one CDK app; `cdk destroy` plus a clean-up checklist. | No IaC | Write the CDK app |
 | R13 | Optional **Knowledge Base** (Bedrock KB over S3 documents) for retrieval. | Phase 2 only: procurement policy documents (approval limits, preferred suppliers). | Not used | None for the hackathon |
 
@@ -48,30 +48,38 @@ The blueprint is a customer service agent. Its structure, read from its README a
 ## 4. Components and interfaces
 
 ### 4.1 Agent on AgentCore Runtime
-- **Entrypoint:** `POST /invocations` with a body of `{"action": "extract" | "recommend", "session_id": "...", "text" | "request": ...}`.
+- **Entrypoint:** `POST /invocations` with a body of `{"action": "extract" | "recommend", "session_id": "...", "text" | "requests": [...]}`. One request may hold several products (a bill of materials) that share one required date.
 - **Authorization:** Runtime JWT authorizer, Cognito user pool, app client allow-list.
-- **Behaviour:** same as today's `ProcurementAgent`. The confirmed product, quantity and date always override what the model passes to tools.
+- **Behaviour:** same as today's `ProcurementAgent`:
+  - **Extraction:** product, quantity, technical specs and budget for each product.
+  - **Validation:** Python validates each value, converts units, and splits specs the model merged ("M18 PNP") using the words in the supplier catalogue.
+  - **Confirmed values win:** each line's confirmed product, quantity, specs, budget and date always override what the model passes to tools.
+  - **No skipped lines:** any line the model skips is completed by the app.
 - **Outbound calls:** Bedrock Converse (Nova Lite, model ID from SSM), Bedrock Guardrails, AgentCore Memory and Gateway (MCP).
 
 ### 4.2 Gateway tools (Lambda targets, read-only)
 
 | Tool | Input | Output | Data |
 |---|---|---|---|
-| `get_supplier_quotes` | `product`, `quantity` | quotes, excluded rows, available products | reads `SupplierQuotes` |
-| `compare_quotes` | `required_date`, `price_weight`, `delivery_weight`, plus the quotes from the same session | ranking, recommended supplier, `winner_vs_runner_up`, warnings | none |
+| `get_supplier_quotes` | `line` (product, quantity, specs and budget come from the confirmed line) | best qualifying model per supplier with spec checks, volume price, stock and delivery date; rejected models with reasons | reads `SupplierCatalog` |
+| `compare_quotes` | `line`, optional `price_weight`, `delivery_weight` | ranking (deadline first, then 60% price, 40% delivery), recommended supplier, `winner_vs_runner_up`, warnings; after the last line, `purchase_order_plan` (one PO per supplier) | none |
 
 In this design the quotes stored by the first tool are passed to the second by session ID. The model can't change prices between the two calls, which keeps today's rule.
+
+`SupplierCatalog` holds simulated catalogues for DwyerOmega, Siemens, WIKA, Honeywell and Emerson. The supplier names are real; the prices, stock and lead times are mocked. It has 29 models across pressure, temperature, flow, level and proximity sensors, with volume price breaks, stock, minimum order quantities and specs. Live data would come from distributor APIs or RFQ responses through the same tool.
 
 ### 4.3 Approval and PO service (no agent access)
 
 | Endpoint | Caller | Rules (from `approval.py`) |
 |---|---|---|
-| `POST /cases` | requester JWT | needs a recommendation with at least one supplier |
-| `GET /cases?mine=true` / `GET /cases?status=PENDING_APPROVAL` | requester / approver | requesters see only their own cases |
-| `POST /cases/{id}/decision` | approver JWT | approver group, no self-approval, quote not expired, one decision per case, comment for rejection or override |
-| `GET /cases/{id}/po` | either role on the case | returns a presigned S3 URL for the PDF |
+| `POST /orders` | requester JWT | splits the order into **one approval request per winning supplier**, linked by an order ID; products with no qualifying supplier are reported, not submitted |
+| `GET /requests?mine=true` / `GET /requests?status=PENDING_APPROVAL` | requester / approver | requesters see only their own requests |
+| `POST /requests/{id}/decision` | approver JWT | approver group, no self-approval, quotes not expired, one decision per request, comment for rejection or a supplier change; a changed supplier must have quoted every product in the request |
+| `GET /requests/{id}/po` | either role on the request | returns a presigned S3 URL for the PDF |
 
-Cases and the audit log move from SQLite and `audit.jsonl` to DynamoDB. A conditional write on `status = PENDING_APPROVAL` keeps "one decision per case" safe across Lambda instances. PO numbers come from an atomic DynamoDB counter, so a number is never reused.
+Each approved request produces **exactly one PDF purchase order** to its supplier, listing all of that supplier's products. Requests from the same order are approved or rejected independently.
+
+Requests and the audit log move from SQLite and `audit.jsonl` to DynamoDB. A conditional write on `status = PENDING_APPROVAL` keeps "one decision per request" safe across Lambda instances. PO numbers come from an atomic DynamoDB counter, so a number is never reused.
 
 ## 5. Security summary
 - **Agent permissions:** the agent role can't reach the approval API, the Cases table or the PO bucket. Policy allows only the two tool names; any other tool call is denied by default.
