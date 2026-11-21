@@ -42,10 +42,12 @@ class User:
 
 @dataclass
 class Case:
-    """One approval case. A single-product request has one line; a build has several.
+    """One approval request, which becomes exactly one purchase order.
 
-    `recommendation` is line 1 and `extra_lines` the rest. After approval, `chosen_quotes`
-    holds the approved quote for every line, and `purchase_orders` one PO per supplier.
+    A single-product request has one line. A multi-product request is split into one case per
+    winning supplier; those cases share `build_id`, and each holds that supplier's products.
+    `recommendation` is line 1 and `extra_lines` the rest. After approval, `chosen_quotes` holds
+    the approved quote for every line (all from one supplier), and `purchase_orders` the PO.
     """
     case_id: str
     recommendation: Recommendation
@@ -59,10 +61,27 @@ class Case:
     extra_lines: list[Recommendation] = field(default_factory=list)
     title: str = ""
     summary: str = ""
+    build_id: str = ""        # shared by all approval requests created from one multi-product request
+    build_part: int = 0       # 1-based position among those requests
+    build_parts: int = 0      # how many approval requests the order was split into
 
     @property
     def lines(self) -> list[Recommendation]:
         return [self.recommendation, *self.extra_lines]
+
+    @property
+    def supplier(self) -> str:
+        """The supplier this request goes to (approved, else recommended)."""
+        q = self.chosen_quote or self.recommendation.comparison.recommended.quote
+        return q.supplier
+
+    def supplier_options(self) -> list[str]:
+        """Suppliers with a qualifying quote for every product in this request, best first."""
+        names = [s.quote.supplier for s in self.recommendation.comparison.ranked]
+        for r in self.extra_lines:
+            have = {s.quote.supplier for s in r.comparison.ranked}
+            names = [n for n in names if n in have]
+        return names
 
     @property
     def is_build(self) -> bool:
@@ -115,34 +134,63 @@ class ApprovalService:
 
     # ---- workflow ----------------------------------------------------
     def submit(self, recommendation: Recommendation | BuildRecommendation, submitted_by: str) -> str:
-        """Create a case. For a build, only lines with a qualifying supplier are submitted."""
+        """Create one approval request. A multi-product request must go to a single supplier here;
+        use submit_build to split one across suppliers."""
         build = (recommendation if isinstance(recommendation, BuildRecommendation)
                  else BuildRecommendation.single(recommendation))
-        lines = list(build.orderable)
-        if not lines:
+        if len(build.po_groups()) > 1:
+            raise ApprovalError("These products go to several suppliers; submit one request per supplier.")
+        return self.submit_build(build, submitted_by)[0]
+
+    def submit_build(self, build: BuildRecommendation, submitted_by: str) -> list[str]:
+        """Create one approval request per winning supplier, each holding that supplier's products.
+
+        Products no supplier can fulfil are not submitted. Returns the case IDs in supplier order.
+        """
+        orderable = list(build.orderable)
+        if not orderable:
             raise ApprovalError("There is no supplier option to approve.")
-        case_id = uuid.uuid4().hex[:8]
-        case = Case(case_id, lines[0], submitted_by, submitted_at=self._clock().isoformat(),
-                    extra_lines=lines[1:], title=build.title,
-                    summary=build.summary if len(build.lines) > 1 else "")
+        groups = build.po_groups()
+        multi = len(build.lines) > 1
+        build_id = uuid.uuid4().hex[:8] if multi else ""
+        now = self._clock().isoformat()
+        cases = []
+        for part, (supplier, idx) in enumerate(groups, start=1):
+            lines = [orderable[i] for i in idx]
+            cases.append(Case(uuid.uuid4().hex[:8], lines[0], submitted_by, submitted_at=now,
+                              extra_lines=lines[1:], title=build.title if multi else "",
+                              summary=build.summary if multi else "", build_id=build_id,
+                              build_part=part if multi else 0, build_parts=len(groups) if multi else 0))
         with self._lock:
-            self._store.save(case)
-        details = {
-            "request": lines[0].request.to_dict(),
-            "ranking": lines[0].comparison.to_dict(),
-            "excluded": lines[0].excluded,
-            "explanation": lines[0].explanation,
-        }
-        if case.is_build or build.unfilled:
-            details.update({
-                "title": build.title, "summary": build.summary,
-                "lines": [{"request": r.request.to_dict(), "ranking": r.comparison.to_dict()} for r in lines],
-                "not_submitted": [r.request.product for r in build.unfilled],
-                "planned_pos": [{"supplier": s, "lines": idx} for s, idx in case.po_groups()],
-            })
-        self._audit("submitted", case_id, submitted_by, details)
-        self._notify_approvers(case_id, submitted_by)
-        return case_id
+            for case in cases:
+                self._store.save(case)
+        ids = [c.case_id for c in cases]
+        for case in cases:
+            details = {
+                "request": case.recommendation.request.to_dict(),
+                "ranking": case.recommendation.comparison.to_dict(),
+                "excluded": case.recommendation.excluded,
+                "explanation": case.recommendation.explanation,
+            }
+            if multi:
+                details.update({
+                    "build_id": build_id, "title": build.title, "summary": build.summary,
+                    "part": case.build_part, "parts": case.build_parts, "supplier": case.supplier,
+                    "lines": [{"request": r.request.to_dict(), "ranking": r.comparison.to_dict()}
+                              for r in case.lines],
+                    "other_requests": [i for i in ids if i != case.case_id],
+                    "not_submitted": [r.request.product for r in build.unfilled],
+                })
+            self._audit("submitted", case.case_id, submitted_by, details)
+        for case in cases:
+            self._notify_approvers(case.case_id, submitted_by)
+        return ids
+
+    def build_cases(self, build_id: str) -> list[Case]:
+        """All approval requests created from one multi-product request."""
+        if not build_id:
+            return []
+        return [c for c in self._store.list() if c.build_id == build_id]
 
     def _notify_approvers(self, case_id: str, submitted_by: str) -> None:
         """Alert approvers. The case is already saved, so a failure here never loses it."""
@@ -193,17 +241,19 @@ class ApprovalService:
         chosen_supplier: str | None = None,
         line_suppliers: dict[int, str] | None = None,
     ) -> Decision:
-        """Approve or reject a whole case.
+        """Approve or reject a whole approval request. It always becomes one purchase order.
 
-        chosen_supplier overrides line 1 (single-product requests); line_suppliers maps any line
-        index to a supplier. Lines not mentioned keep the recommended supplier.
+        chosen_supplier switches every product in the request to that supplier (it must have a
+        qualifying quote for each). line_suppliers maps line indexes to suppliers; the result must
+        still be a single supplier.
         """
         comment = (comment or "").strip()
-        choices = dict(line_suppliers or {})
-        if chosen_supplier:
-            choices.setdefault(0, chosen_supplier)
         with self._lock:
             case = self.get(case_id)
+            choices = dict(line_suppliers or {})
+            if chosen_supplier:
+                for i in range(len(case.lines)):
+                    choices.setdefault(i, chosen_supplier)
             try:
                 chosen = self._validate(case, user, approve, comment, choices)
             except ApprovalError as exc:
@@ -336,8 +386,8 @@ class ApprovalService:
             q = recommended
             if pick and pick != recommended.supplier:
                 if pick not in quotes:
-                    raise ApprovalError(f"{pick} is not one of the quoted suppliers"
-                                        + (f" for {rec.request.product}." if case.is_build else "."))
+                    raise ApprovalError(f"{pick} has no qualifying quote for {rec.request.product}."
+                                        if case.is_build else f"{pick} is not one of the quoted suppliers.")
                 if approve and not comment:
                     raise ApprovalError("A comment is required when choosing a supplier other than the recommended one.")
                 q = quotes[pick]
@@ -347,4 +397,7 @@ class ApprovalService:
                     "Refresh the quotes before approving."
                 )
             chosen.append(q)
+        if approve and len({q.supplier for q in chosen}) > 1:
+            raise ApprovalError("All products in one approval request go to one supplier, so they become one "
+                                "purchase order. Choose a supplier that quoted every product, or reject the request.")
         return chosen

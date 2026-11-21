@@ -72,6 +72,9 @@ def case_to_dict(case: "Case") -> dict:
         "extra_lines": [recommendation_to_dict(r) for r in case.extra_lines],
         "title": case.title,
         "summary": case.summary,
+        "build_id": case.build_id,
+        "build_part": case.build_part,
+        "build_parts": case.build_parts,
         "decision": asdict(case.decision) if case.decision else None,
         "chosen_quotes": [q.to_dict() for q in case.chosen_quotes],
         "purchase_orders": [po.to_dict() for po in case.purchase_orders],
@@ -98,6 +101,9 @@ def case_from_dict(d: dict) -> "Case":
         extra_lines=[recommendation_from_dict(r) for r in d.get("extra_lines") or []],
         title=d.get("title", ""),
         summary=d.get("summary", ""),
+        build_id=d.get("build_id", ""),
+        build_part=int(d.get("build_part") or 0),
+        build_parts=int(d.get("build_parts") or 0),
     )
 
 

@@ -282,7 +282,7 @@ BUILD_ARGS = {
 }
 
 
-def test_UI17_multi_product_request_creates_one_po_per_supplier(make_app, tmp_path):
+def test_UI17_multi_product_request_creates_one_approval_request_per_supplier(make_app, tmp_path):
     at = login(make_app(), "alice")
     from fakes import ScriptedLLM
     at.session_state["agent"]._llm = ScriptedLLM(BUILD_ARGS)
@@ -294,21 +294,26 @@ def test_UI17_multi_product_request_creates_one_po_per_supplier(make_app, tmp_pa
     btn(at, "Confirm and search suppliers").click().run()
     assert not at.exception
     page = " ".join(m.value for m in at.markdown)
-    assert "2 purchase orders · one per supplier" in page and "Rocket engine test stand" in page
+    assert "2 approval requests → 2 purchase orders · one per supplier" in page and "Rocket engine test stand" in page
     assert [t.label for t in at.tabs if "→" in t.label] == ["1 · pressure sensor → WIKA", "2 · flow meter → DwyerOmega",
-                                              "3 · proximity sensor → DwyerOmega"]
-    btn(at, "Submit for approval").click().run()
-    assert any("Submitted for approval" in i.value for i in at.info)
+                                                            "3 · proximity sensor → DwyerOmega"]
+    btn(at, "Submit 2 approval requests (one per supplier)").click().run()
+    assert any("Submitted 2 approval requests, one per supplier" in i.value for i in at.info)
+    ids = at.session_state["ui_submitted_case"]
+    assert len(ids) == 2
 
     logout(at)
     login(at, "bob")
-    labels = [s.label for s in at.selectbox]
-    assert labels == ["1. 100 x pressure sensor", "2. 6 x flow meter", "3. 200 x proximity sensor"]
-    assert any("Approving issues 2 numbered PDF purchase orders" in c.value for c in at.caption)
-    btn(at, "Approve").click().run()
-    assert not at.exception
+    assert [t.label for t in at.tabs][0] == "Approval queue (2)"
+    assert [s.label for s in at.selectbox] == ["Supplier", "Supplier for all 2 products"]
+    assert any("Request 1 of 2 in this order" in c.value for c in at.caption)
+    assert any("1 numbered PDF purchase order to the selected supplier for all 2 products" in c.value for c in at.caption)
+    btn(at, "Approve").click().run()          # the WIKA request
+    assert not at.exception and [t.label for t in at.tabs][0] == "Approval queue (1)"
+    btn(at, "Approve").click().run()          # the DwyerOmega request
+    assert not at.exception and [t.label for t in at.tabs][0] == "Approval queue (0)"
     issued = [s.value for s in at.success if "Purchase order **PO-" in s.value]
-    assert len(issued) == 2 and "to WIKA, 1 item(s)" in issued[0] and "to DwyerOmega, 2 item(s)" in issued[1]
+    assert len(issued) == 2 and any("to DwyerOmega, 2 item(s)" in x for x in issued)
     assert len(at.get("download_button")) == 2
     assert sorted(p.name for p in (tmp_path / "pos").glob("*.pdf")) == ["PO-2026-0001.pdf", "PO-2026-0002.pdf"]
 
@@ -323,5 +328,7 @@ def test_UI18_excluding_an_item_searches_only_the_rest(make_app):
     btn(at, "Confirm and search suppliers").click().run()
     assert not at.exception
     page = " ".join(m.value for m in at.markdown)
-    assert "1 purchase order · one per supplier" in page
+    assert "1 approval request → 1 purchase order" in page
     assert [t.label for t in at.tabs if "→" in t.label] == ["1 · flow meter → DwyerOmega", "2 · proximity sensor → DwyerOmega"]
+    btn(at, "Submit for approval").click().run()
+    assert isinstance(at.session_state["ui_submitted_case"], str)

@@ -409,7 +409,8 @@ def _po_plan(lines: list[Recommendation], quotes: list, title: str = "", heading
                      f'{f"<div class=i>{esc(site)}</div>" if site else ""}{rows}'
                      f'<div class="a">{esc(_money(sub, currency))}</div></div>')
     k = len(groups)
-    head = heading or f"{k} purchase order{'s' if k != 1 else ''} · one per supplier"
+    head = heading or (f"{k} approval requests → {k} purchase orders · one per supplier" if k > 1
+                       else "1 approval request → 1 purchase order")
     name = f"{esc(title)} · " if title else ""
     _html(f'<div class="pa-plan"><div class="h"><span class="t">🧾 {name}{esc(head)}</span>'
           f'<span class="tot">Total {esc(_money(total, currency))}</span></div>'
@@ -417,17 +418,21 @@ def _po_plan(lines: list[Recommendation], quotes: list, title: str = "", heading
 
 
 def _show_build(build: BuildRecommendation, available_products: list[str] | None = None, full: bool = True,
-                quotes: list | None = None) -> None:
+                quotes: list | None = None, case: Case | None = None) -> None:
     """A single-product result as before; a multi-product result as summary, PO plan and one tab per product."""
     if len(build.lines) == 1:
         _show_recommendation(build.lines[0], available_products, full=full)
         return
     if build.summary:
         text = esc(build.summary).replace("\n", "<br>")
-        _html(f'<div class="pa-ai"><div class="lbl">✨ AI summary · Amazon Bedrock</div>{text}</div>')
+        what = "of the whole order" if case is not None and case.build_parts > 1 else ""
+        _html(f'<div class="pa-ai"><div class="lbl">✨ AI summary {what} · Amazon Bedrock</div>{text}</div>')
     if quotes is None:
         quotes = [r.comparison.recommended.quote if r.comparison.recommended else None for r in build.lines]
-    _po_plan(list(build.lines), quotes, build.title)
+    heading = ""
+    if case is not None:
+        heading = f"This request becomes 1 purchase order to {case.supplier}"
+    _po_plan(list(build.lines), quotes, build.title, heading=heading)
     for r in build.unfilled:
         st.warning(f"No supplier can fulfil **{r.request.quantity} x {r.request.product}** with the stated "
                    "requirements. It is not included in the purchase orders.")
@@ -446,10 +451,12 @@ def _case_build(case: Case) -> BuildRecommendation:
 
 def _case_title(case: Case) -> str:
     req = case.recommendation.request
-    if case.is_build:
-        name = case.title or "Multi-product request"
-        return (f"{case.case_id} · {name}: {len(case.lines)} products by {req.required_date.isoformat()} · "
-                f"{STATUS_BADGE[case.status]}")
+    if case.build_id:
+        name = case.title or "Multi-product order"
+        n = len(case.lines)
+        what = f"{n} products" if n > 1 else f"{req.quantity} x {req.product}"
+        return (f"{case.case_id} · {name} · {case.supplier} (request {case.build_part}/{case.build_parts}): "
+                f"{what} by {req.required_date.isoformat()} · {STATUS_BADGE[case.status]}")
     return (f"{case.case_id} · {req.quantity} x {req.product} by {req.required_date.isoformat()} · "
             f"{STATUS_BADGE[case.status]}")
 
@@ -466,15 +473,16 @@ def _days_waiting(case: Case) -> int:
     return max(0, (datetime.now(timezone.utc) - submitted).days)
 
 
-def _case_facts(case: Case, show_requester: bool = True) -> None:
+def _case_facts(case: Case, show_requester: bool = True, svc: ApprovalService | None = None) -> None:
     req = case.recommendation.request
     q = case.recommendation.comparison.recommended.quote
     facts = []
     if show_requester:
         facts.append(("👤 Requested by", case.submitted_by))
-    if case.is_build:
-        groups = case.po_groups()
-        facts.append(("📦 Items", f"{len(case.lines)} products · {len(groups)} purchase order(s)"))
+    if case.build_id:
+        facts.append(("🏭 Supplier", case.supplier))
+        n = len(case.lines)
+        facts.append(("📦 Items", f"{n} product{'s' if n != 1 else ''} · 1 purchase order"))
     else:
         facts.append(("📦 Item", f"{req.quantity} x {req.product}"))
     facts += [
@@ -484,6 +492,13 @@ def _case_facts(case: Case, show_requester: bool = True) -> None:
     ]
     chips = "".join(f'<div class="pa-fact">{esc(k)} <b>{esc(v)}</b></div>' for k, v in facts)
     _html(f'<div class="pa-facts">{chips}</div>')
+    if case.build_id and case.build_parts > 1 and svc is not None:
+        others = [c for c in svc.build_cases(case.build_id) if c.case_id != case.case_id]
+        if others:
+            listed = "; ".join(f"{c.case_id} · {c.supplier} · {STATUS_LABEL[c.status].split('.')[0].lower()}"
+                               for c in others)
+            st.caption(f"🧩 Request {case.build_part} of {case.build_parts} in this order (one per supplier). "
+                       f"Other request(s): {listed}")
     if req.raw_text:
         st.caption(f"Original request: \u201c{req.raw_text}\u201d")
 
@@ -790,16 +805,26 @@ def _new_request_tab(agent: ProcurementAgent, svc: ApprovalService, account: Acc
         _section("Recommendation")
         _show_build(build, agent.available_products(), full=True)
         if build.orderable:
-            case_id = ss.get("ui_submitted_case")
-            if case_id:
-                st.info(f"Submitted for approval. Case ID: **{case_id}**. Approvers have been alerted. "
+            submitted = ss.get("ui_submitted_case")
+            groups = build.po_groups()
+            if isinstance(submitted, list):
+                listed = ", ".join(f"**{cid}** ({supplier})" for cid, (supplier, _) in zip(submitted, groups))
+                st.info(f"Submitted {len(submitted)} approval requests, one per supplier: {listed}. Approvers have "
+                        "been alerted. Each approved request becomes one purchase order. No purchase has been made. "
+                        "Track them under My requests.")
+            elif submitted:
+                st.info(f"Submitted for approval. Case ID: **{submitted}**. Approvers have been alerted. "
                         "No purchase has been made. Track it under My requests.")
-            elif st.button("Submit for approval", key="ui_submit_btn", type="primary", icon=":material/send:"):
-                try:
-                    ss["ui_submitted_case"] = svc.submit(build, account.username)
-                    st.rerun()
-                except ApprovalError as exc:
-                    st.error(str(exc))
+            else:
+                label = (f"Submit {len(groups)} approval requests (one per supplier)" if len(groups) > 1
+                         else "Submit for approval")
+                if st.button(label, key="ui_submit_btn", type="primary", icon=":material/send:"):
+                    try:
+                        ids = svc.submit_build(build, account.username)
+                        ss["ui_submitted_case"] = ids if len(ids) > 1 else ids[0]
+                        st.rerun()
+                    except ApprovalError as exc:
+                        st.error(str(exc))
 
     stage = 1
     if ext is not None:
@@ -905,9 +930,9 @@ def _my_requests_tab(svc: ApprovalService, account: Account) -> None:
     st.write("")
     for case in reversed(cases):
         with st.expander(_case_title(case), expanded=case is cases[-1]):
-            _case_facts(case, show_requester=False)
+            _case_facts(case, show_requester=False, svc=svc)
             _show_outcome(svc, case)
-            _show_build(_case_build(case), full=False, quotes=case.chosen_quotes or None)
+            _show_build(_case_build(case), full=False, quotes=case.chosen_quotes or None, case=case)
 
 
 def _requester_home(agent, svc, account, today) -> None:
@@ -929,8 +954,8 @@ def _approval_queue_tab(svc: ApprovalService, account: Account, alerts: AlertSto
     user = account.as_user()
     for case in pending:  # oldest first
         with st.expander(_case_title(case), expanded=True):
-            _case_facts(case)
-            _show_build(_case_build(case), full=False)
+            _case_facts(case, svc=svc)
+            _show_build(_case_build(case), full=False, case=case)
             if case.submitted_by == account.username:
                 st.warning("You submitted this request, so another approver must decide it.")
                 continue
@@ -938,22 +963,18 @@ def _approval_queue_tab(svc: ApprovalService, account: Account, alerts: AlertSto
                 _section("Your decision")
                 picks: dict[int, str] = {}
                 if case.is_build:
-                    st.caption("Supplier per product. Change one only with a reason in the comment.")
-                    cols = st.columns(min(3, len(case.lines)))
-                    for i, r in enumerate(case.lines):
-                        options = [s.quote.supplier for s in r.comparison.ranked]
-                        picks[i] = cols[i % len(cols)].selectbox(
-                            f"{i + 1}. {r.request.quantity} x {r.request.product}", options, index=0,
-                            key=f"ui_sup_{case.case_id}_{i}")
-                    chosen_quotes = [next(s.quote for s in r.comparison.ranked if s.quote.supplier == picks[i])
-                                     for i, r in enumerate(case.lines)]
-                    groups = group_by_supplier(chosen_quotes)
-                    changed = any(picks[i] != r.comparison.recommended.quote.supplier for i, r in enumerate(case.lines))
-                    if changed:
-                        _po_plan(case.lines, chosen_quotes, heading=f"With your changes: {len(groups)} purchase order(s)")
-                    comment = st.text_input("Comment (required to reject or to choose another supplier)",
+                    options = case.supplier_options()
+                    c1, c2 = st.columns([1, 2])
+                    chosen = c1.selectbox(f"Supplier for all {len(case.lines)} products", options, index=0,
+                                          key=f"ui_sup_{case.case_id}",
+                                          help="Only suppliers with a qualifying quote for every product")
+                    comment = c2.text_input("Comment (required to reject or to choose another supplier)",
                                             key=f"ui_cmt_{case.case_id}")
-                    chosen = None
+                    if chosen != case.supplier:
+                        quotes = [next(s.quote for s in r.comparison.ranked if s.quote.supplier == chosen)
+                                  for r in case.lines]
+                        _po_plan(case.lines, quotes, heading=f"With your change: 1 purchase order to {chosen}")
+                    groups = [(chosen, list(range(len(case.lines))))]
                 else:
                     rec = case.recommendation
                     suppliers = [s.quote.supplier for s in rec.comparison.ranked]
@@ -969,9 +990,8 @@ def _approval_queue_tab(svc: ApprovalService, account: Account, alerts: AlertSto
                 if b2.button("Reject", key=f"ui_reject_{case.case_id}", width="stretch",
                              icon=":material/cancel:"):
                     _decide(svc, case.case_id, user, False, comment, chosen, alerts, picks or None)
-                n = len(groups)
-                st.caption(f"Approving issues {n} numbered PDF purchase order{'s' if n != 1 else ''}, one per supplier."
-                           if case.is_build else
+                st.caption(f"Approving issues 1 numbered PDF purchase order to the selected supplier for all "
+                           f"{len(case.lines)} products." if case.is_build else
                            "Approving issues a numbered PDF purchase order for the selected supplier.")
 
 
@@ -993,17 +1013,17 @@ def _history_tab(svc: ApprovalService, account: Account) -> None:
         return
     for case in reversed(decided):  # newest first
         with st.expander(_case_title(case), expanded=False):
-            _case_facts(case)
+            _case_facts(case, svc=svc)
             _show_outcome(svc, case)
             if case.status == APPROVED:
-                label = "Generate purchase orders" if case.is_build else "Generate purchase order"
+                label = "Generate purchase order"
                 if st.button(label, key=f"ui_po_{case.case_id}", icon=":material/description:"):
                     try:
                         svc.issue_pos(case.case_id, account.as_user())
                         st.rerun()
                     except ApprovalError as exc:
                         st.error(str(exc))
-            _show_build(_case_build(case), full=False, quotes=case.chosen_quotes or None)
+            _show_build(_case_build(case), full=False, quotes=case.chosen_quotes or None, case=case)
 
 
 def _active_alerts(svc: ApprovalService, alerts: AlertStore, account: Account) -> list:

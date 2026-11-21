@@ -62,74 +62,85 @@ def pdf_text(data):
     return "\n".join(p.extract_text() for p in PdfReader(io.BytesIO(data)).pages)
 
 
-# ---------------------------------------------------------------- plan
-def test_B1_three_products_two_suppliers_two_pos(repo, svc, tmp_path):
+# ---------------------------------------------------------------- one approval request per supplier
+def test_B1_three_products_two_suppliers_two_requests_two_pos(repo, svc, tmp_path):
     b = build(repo, PRESSURE, FLOW, PROX)
-    assert [s for s, _ in b.po_groups()] == ["WIKA", "DwyerOmega"]
-    assert b.po_groups()[1][1] == [1, 2]
-    cid = svc.submit(b, "alice")
-    svc.decide(cid, BOB, True, "ok")
-    case = svc.get(cid)
-    assert case.status == PO_ISSUED and case.is_build and len(case.lines) == 3
-    pos = case.purchase_orders
-    assert [(p.po_number, p.supplier, len(p.items())) for p in pos] == [
-        ("PO-2026-0001", "WIKA", 1), ("PO-2026-0002", "DwyerOmega", 2)]
-    dwyer = pos[1]
-    assert dwyer.total_price == pytest.approx(sum(x["amount"] for x in dwyer.items()))
-    assert sum(p.total_price for p in pos) == pytest.approx(b.total())
-    assert dwyer.build_title == "Engine test stand"
-    text = pdf_text(svc.po_pdf(cid, "PO-2026-0002"))
+    ids = svc.submit_build(b, "alice")
+    assert len(ids) == 2
+    wika, dwyer = (svc.get(i) for i in ids)
+    assert (wika.supplier, [r.request.product for r in wika.lines]) == ("WIKA", ["pressure sensor"])
+    assert (dwyer.supplier, [r.request.product for r in dwyer.lines]) == ("DwyerOmega", ["flow meter", "proximity sensor"])
+    assert wika.build_id == dwyer.build_id != "" and (wika.build_part, dwyer.build_part, dwyer.build_parts) == (1, 2, 2)
+    assert {c.case_id for c in svc.build_cases(wika.build_id)} == set(ids)
+    for cid in ids:
+        svc.decide(cid, BOB, True, "ok")
+    wika, dwyer = (svc.get(i) for i in ids)
+    assert [(p.po_number, p.supplier, len(p.items())) for p in wika.purchase_orders] == [("PO-2026-0001", "WIKA", 1)]
+    assert [(p.po_number, p.supplier, len(p.items())) for p in dwyer.purchase_orders] == [("PO-2026-0002", "DwyerOmega", 2)]
+    po = dwyer.purchase_order
+    assert po.total_price == pytest.approx(sum(x["amount"] for x in po.items())) and po.build_title == "Engine test stand"
+    assert wika.purchase_order.total_price + po.total_price == pytest.approx(b.total())
+    text = pdf_text(svc.po_pdf(dwyer.case_id))
     for part in ["FMG91-PVDF-2", "PRX-M18-8P", "Flow Meter", "Proximity Sensor", "Project: Engine test stand"]:
         assert part in text, part
-    assert "A-10" not in text  # the WIKA item is on the other PO
-    assert "A-10" in pdf_text(svc.po_pdf(cid, "PO-2026-0001"))
-    events = [e["event"] for e in audit(tmp_path)]
-    assert events.count("po_issued") == 2
-    submitted = audit(tmp_path)[0]["details"]
-    assert [p["supplier"] for p in submitted["planned_pos"]] == ["WIKA", "DwyerOmega"]
+    assert "A-10" not in text
+    submitted = [e for e in audit(tmp_path) if e["event"] == "submitted"]
+    assert [e["details"]["supplier"] for e in submitted] == ["WIKA", "DwyerOmega"]
+    assert submitted[0]["details"]["other_requests"] == [ids[1]]
 
 
-def test_B2_one_supplier_wins_everything_one_po(repo, svc):
+def test_B2_one_supplier_wins_everything_one_request_one_po(repo, svc):
     b = build(repo, FLOW, PROX)
-    assert [s for s, _ in b.po_groups()] == ["DwyerOmega"]
-    cid = svc.submit(b, "alice")
+    [cid] = svc.submit_build(b, "alice")
+    assert svc.submit(build(repo, FLOW, PROX), "alice")  # submit() also accepts a one-supplier order
     svc.decide(cid, BOB, True)
-    pos = svc.get(cid).purchase_orders
-    assert len(pos) == 1 and len(pos[0].items()) == 2
+    [po] = svc.get(cid).purchase_orders
+    assert len(po.items()) == 2
 
 
-def test_B3_approver_override_can_merge_pos(repo, svc):
-    cid = svc.submit(build(repo, PRESSURE, FLOW, PROX), "alice")
-    with pytest.raises(ApprovalError, match="comment is required"):
-        svc.decide(cid, BOB, True, "", line_suppliers={0: "DwyerOmega"})
-    svc.decide(cid, BOB, True, "One supplier is easier to manage", line_suppliers={0: "DwyerOmega"})
-    case = svc.get(cid)
-    assert [q.supplier for q in case.chosen_quotes] == ["DwyerOmega"] * 3
-    assert list(case.decision.line_suppliers) == ["DwyerOmega"] * 3
-    [po] = case.purchase_orders
-    assert len(po.items()) == 3
-    assert "over the recommended WIKA for pressure sensor" in pdf_text(svc.po_pdf(cid))
+def test_B3_each_supplier_request_is_decided_on_its_own(repo, svc):
+    wika_id, dwyer_id = svc.submit_build(build(repo, PRESSURE, FLOW, PROX), "alice")
+    svc.decide(wika_id, BOB, True, "ok")
+    svc.decide(dwyer_id, BOB, False, "Flow meters are on hold")
+    assert svc.get(wika_id).status == PO_ISSUED and len(svc.get(wika_id).purchase_orders) == 1
+    assert svc.get(dwyer_id).status == "REJECTED" and svc.get(dwyer_id).purchase_orders == []
 
 
-def test_B4_invalid_overrides_refused(repo, svc):
-    cid = svc.submit(build(repo, PRESSURE, FLOW), "alice")
-    with pytest.raises(ApprovalError, match="not one of the quoted suppliers for flow meter"):
-        svc.decide(cid, BOB, True, "x", line_suppliers={1: "WIKA"})
+def test_B4_supplier_change_applies_to_the_whole_request(repo, svc):
+    _, dwyer_id = svc.submit_build(build(repo, PRESSURE, FLOW, PROX), "alice")
+    case = svc.get(dwyer_id)
+    assert case.supplier_options() == ["DwyerOmega", "Siemens"]  # quoted both flow meter and proximity sensor
+    with pytest.raises(ApprovalError, match="Honeywell has no qualifying quote for flow meter"):
+        svc.decide(dwyer_id, BOB, True, "x", chosen_supplier="Honeywell")
+    with pytest.raises(ApprovalError, match="go to one supplier"):
+        svc.decide(dwyer_id, BOB, True, "x", line_suppliers={0: "Siemens"})
     with pytest.raises(ApprovalError, match="Line 6 is not part"):
-        svc.decide(cid, BOB, True, "x", line_suppliers={5: "WIKA"})
-    assert svc.get(cid).status == PENDING
+        svc.decide(dwyer_id, BOB, True, "x", line_suppliers={5: "Siemens"})
+    with pytest.raises(ApprovalError, match="comment is required"):
+        svc.decide(dwyer_id, BOB, True, "", chosen_supplier="Siemens")
+    svc.decide(dwyer_id, BOB, True, "Siemens framework agreement", chosen_supplier="Siemens")
+    case = svc.get(dwyer_id)
+    assert [q.supplier for q in case.chosen_quotes] == ["Siemens", "Siemens"]
+    [po] = case.purchase_orders
+    assert po.supplier == "Siemens" and len(po.items()) == 2
+    assert "over the recommended DwyerOmega for flow meter" in pdf_text(svc.po_pdf(dwyer_id))
 
 
 def test_B5_unfilled_lines_are_not_submitted(repo, svc, tmp_path):
     b = build(repo, PRESSURE, IMPOSSIBLE)
-    assert len(b.orderable) == 1 and len(b.unfilled) == 1
-    cid = svc.submit(b, "alice")
+    [cid] = svc.submit_build(b, "alice")
     case = svc.get(cid)
-    assert len(case.lines) == 1 and not case.is_build
+    assert len(case.lines) == 1 and case.build_parts == 1
     assert audit(tmp_path)[0]["details"]["not_submitted"] == ["pressure sensor"]
     only_bad = BuildRecommendation("x", (line(repo, IMPOSSIBLE), line(repo, IMPOSSIBLE)))
     with pytest.raises(ApprovalError, match="no supplier option"):
-        svc.submit(only_bad, "alice")
+        svc.submit_build(only_bad, "alice")
+
+
+def test_B6_submit_refuses_a_multi_supplier_order_without_creating_anything(repo, svc):
+    with pytest.raises(ApprovalError, match="one request per supplier"):
+        svc.submit(build(repo, PRESSURE, FLOW), "alice")
+    assert svc.list_cases() == []
 
 
 class FailSecond:
@@ -150,60 +161,67 @@ class FailSecond:
         return self.inner.pdf_bytes(po)
 
 
-def test_B6_partial_failure_keeps_issued_pos_and_retry_completes(repo, tmp_path):
+def test_B7_po_failure_in_one_request_does_not_affect_the_other(repo, tmp_path):
     issuer = FailSecond(tmp_path / "pos")
     svc = ApprovalService(tmp_path / "a.jsonl", po_issuer=issuer, store=SqliteCaseStore(tmp_path / "c.db"))
-    cid = svc.submit(build(repo, PRESSURE, FLOW, PROX), "alice")
-    svc.decide(cid, BOB, True)
-    case = svc.get(cid)
-    assert case.status == APPROVED and [p.supplier for p in case.purchase_orders] == ["WIKA"]
-    assert "DwyerOmega" in case.po_error
+    wika_id, dwyer_id = svc.submit_build(build(repo, PRESSURE, FLOW, PROX), "alice")
+    svc.decide(wika_id, BOB, True)
+    svc.decide(dwyer_id, BOB, True)
+    assert svc.get(wika_id).status == PO_ISSUED
+    dwyer = svc.get(dwyer_id)
+    assert dwyer.status == APPROVED and dwyer.purchase_orders == [] and "DwyerOmega" in dwyer.po_error
     issuer.fail = False
-    svc.issue_pos(cid, BOB)
-    case = svc.get(cid)
-    assert case.status == PO_ISSUED and [p.supplier for p in case.purchase_orders] == ["WIKA", "DwyerOmega"]
-    assert len(list((tmp_path / "pos").glob("*.pdf"))) == 2
+    svc.issue_pos(dwyer_id, BOB)
+    assert svc.get(dwyer_id).status == PO_ISSUED and len(list((tmp_path / "pos").glob("*.pdf"))) == 2
     with pytest.raises(ApprovalError, match="already issued"):
-        svc.issue_pos(cid, BOB)
+        svc.issue_pos(dwyer_id, BOB)
 
 
-def test_B7_build_case_survives_restart(repo, svc, tmp_path, clock):
-    cid = svc.submit(build(repo, PRESSURE, FLOW, PROX), "alice")
-    svc.decide(cid, BOB, True, "ok", line_suppliers={1: "Siemens"})
+def test_B8_requests_survive_restart(repo, svc, tmp_path, clock):
+    ids = svc.submit_build(build(repo, PRESSURE, FLOW, PROX), "alice")
+    svc.decide(ids[1], BOB, True, "ok", chosen_supplier="Siemens")
     again = ApprovalService(tmp_path / "audit.jsonl", clock=lambda: clock["t"],
                             po_issuer=FilePurchaseOrderIssuer(tmp_path / "pos"),
-                            store=SqliteCaseStore(tmp_path / "cases.db")).get(cid)
-    assert again.title == "Engine test stand" and again.summary == "summary"
-    assert [r.request.product for r in again.lines] == ["pressure sensor", "flow meter", "proximity sensor"]
-    assert [q.supplier for q in again.chosen_quotes] == ["WIKA", "Siemens", "DwyerOmega"]
-    assert [p.supplier for p in again.purchase_orders] == ["WIKA", "Siemens", "DwyerOmega"]
-    assert again.purchase_orders[1].lines[0]["product"] == "flow meter"
+                            store=SqliteCaseStore(tmp_path / "cases.db"))
+    case = again.get(ids[1])
+    assert (case.title, case.summary, case.build_part, case.build_parts) == ("Engine test stand", "summary", 2, 2)
+    assert case.build_id == again.get(ids[0]).build_id
+    assert [r.request.product for r in case.lines] == ["flow meter", "proximity sensor"]
+    assert [q.supplier for q in case.chosen_quotes] == ["Siemens", "Siemens"]
+    assert case.purchase_order.lines[1]["product"] == "proximity sensor"
 
 
-def test_B8_rules_apply_to_every_line(repo, svc, clock):
-    cid = svc.submit(build(repo, PRESSURE, FLOW), "alice")
+def test_B9_rules_apply_to_every_request(repo, svc, clock):
+    ids = svc.submit_build(build(repo, PRESSURE, FLOW), "alice")
     with pytest.raises(ApprovalError, match="own request"):
-        svc.decide(cid, User("alice", "approver"), True)
+        svc.decide(ids[0], User("alice", "approver"), True)
     clock["t"] = NOW + timedelta(days=400)  # past every quote's valid_until
     with pytest.raises(ApprovalError, match="expired"):
-        svc.decide(cid, BOB, True, "ok")
-    assert svc.get(cid).purchase_orders == []
+        svc.decide(ids[1], BOB, True, "ok")
+    assert all(svc.get(i).purchase_orders == [] for i in ids)
 
 
-def test_B9_alert_summary_mentions_items_and_pos(repo, svc):
-    from procurement.notifications import summarize
-    cid = svc.submit(build(repo, PRESSURE, FLOW, PROX), "alice")
-    subject, summary = summarize(svc.get(cid))
-    assert subject == f"Approval needed: Engine test stand, 3 items ({cid})"
-    assert "100 x pressure sensor, 6 x flow meter, 200 x proximity sensor" in summary
-    assert "2 purchase order(s) (WIKA, DwyerOmega)" in summary
+def test_B10_alerts_one_per_supplier_request(repo, tmp_path, clock):
+    from procurement.auth import UserStore
+    from procurement.notifications import AlertStore, InAppNotifier, summarize
+    users = UserStore(tmp_path / "u.json")
+    users.add_user("mass", "pass-1234", "approver")
+    alerts = AlertStore(tmp_path / "cases.db")
+    svc = ApprovalService(tmp_path / "audit.jsonl", clock=lambda: clock["t"], notifier=InAppNotifier(alerts, users),
+                          store=SqliteCaseStore(tmp_path / "cases.db"))
+    ids = svc.submit_build(build(repo, PRESSURE, FLOW, PROX), "alice")
+    assert [a.case_id for a in alerts.unread("mass")] == ids
+    subject, summary = summarize(svc.get(ids[1]))
+    assert subject == f"Approval needed: DwyerOmega, 2 items for Engine test stand ({ids[1]})"
+    assert "6 x flow meter, 200 x proximity sensor from DwyerOmega" in summary and "Request 2 of 2" in summary
 
 
-def test_B10_single_product_cases_unchanged(repo, svc):
+def test_B11_single_product_cases_unchanged(repo, svc):
     cid = svc.submit(line(repo, PRESSURE), "alice")
     svc.decide(cid, BOB, True)
     case = svc.get(cid)
-    assert not case.is_build and case.purchase_order.lines == () and case.purchase_order.items()[0]["quantity"] == 100
+    assert not case.is_build and case.build_id == "" and case.purchase_order.lines == ()
+    assert case.purchase_order.items()[0]["quantity"] == 100
 
 
 # ---------------------------------------------------------------- agent
